@@ -1,0 +1,54 @@
+project_name: aifa
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: aifa
+    main: ./cmd/aifa
+    binary: aifa
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: true
+
+chocolateys:
+  - name: aifa
+    title: AI File Assistant
+    authors: AIFA Contributors
+    project_url: https://github.com/your-org/aifa
+    url_template: "https://github.com/your-org/aifa/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    icon_url: https://raw.githubusercontent.com/your-org/aifa/main/.github/icon.png
+    description: AI-powered local-first file management copilot.
+    license_url: https://github.com/your-org/aifa/blob/main/LICENSE
+    summary: Semantic file management with safety-first dry-runs.
+    tags: "ai files cli local"
+
+scoops:
+  - name: aifa
+    repository:
+      owner: your-org
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_GITHUB_TOKEN }}"
+    homepage: https://github.com/your-org/aifa
+    description: AI-powered local-first file management copilot.
+    license: MIT
