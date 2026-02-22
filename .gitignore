@@ -1,0 +1,30 @@
+# Go build artifacts
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+aifa
+aifa.exe
+
+# Go coverage
+coverage.out
+coverage.html
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

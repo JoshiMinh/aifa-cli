@@ -1,22 +1,22 @@
 # aifa — AI File Assistant
 
-aifa is a local-first CLI copilot for semantic file management.
+aifa is a command-line assistant that helps you clean up messy files and folders.
+It looks at what files are (not just what they are named), then suggests better names, groups related items, and helps you keep things organized safely.
 
-## Core capabilities (MVP scaffold)
+## What aifa helps with
 
-- Intelligent rename planning (`aifa rename`)
-- Organization planning/grouping (`aifa organize`)
-- Metadata suggestions (`aifa metadata`)
-- Safe by default: dry-run mode unless `--apply` is set
-- Curated static model registry in YAML (`assets/models/registry.yaml`)
-- Local Ollama model auto-detection (`aifa models`)
+- Renaming files with clearer, more consistent names
+- Grouping files into useful folders (documents, images, code, and more)
+- Suggesting metadata you can review before making changes
+- Previewing changes first (dry-run) so nothing happens unexpectedly
+- Working locally on your machine, with optional cloud or local AI models
 
-## Why this structure
+## Why people use it
 
-- Provider-agnostic LLM interface in [internal/llm](internal/llm)
-- Composable operations in [internal/ops](internal/ops)
-- Simple CLI composition in [internal/cli](internal/cli)
-- Local config in user config directory (`aifa/config.yaml`)
+- Save time when folders become hard to manage
+- Keep naming and organization consistent across projects
+- Stay in control with safe previews before applying changes
+- Use your own AI provider and API keys
 
 ## Quick start
 
