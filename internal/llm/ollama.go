@@ -17,12 +17,25 @@ type OllamaClient struct {
 }
 
 func (c *OllamaClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
+	response, err := c.Prompt(ctx, fmt.Sprintf("Suggest a concise kebab-case filename stem for: %q. Context: %s. Return only the filename stem.", originalName, contextHint))
+	if err != nil {
+		return "", err
+	}
+	s := strings.TrimSpace(response)
+	s = strings.Trim(s, "\"`")
+	s = strings.ToLower(strings.ReplaceAll(strings.Join(strings.Fields(s), "-"), "_", "-"))
+	if s == "" {
+		return "", fmt.Errorf("ollama returned empty suggestion")
+	}
+	return s, nil
+}
+
+func (c *OllamaClient) Prompt(ctx context.Context, prompt string) (string, error) {
 	model := strings.TrimSpace(c.Model)
 	if model == "" {
 		model = "llama3.2"
 	}
 
-	prompt := fmt.Sprintf("Suggest a concise kebab-case filename stem for: %q. Context: %s. Return only the filename stem.", originalName, contextHint)
 	body := map[string]any{
 		"model":  model,
 		"prompt": prompt,
@@ -57,13 +70,7 @@ func (c *OllamaClient) SuggestName(ctx context.Context, originalName string, con
 		return "", err
 	}
 
-	s := strings.TrimSpace(out.Response)
-	s = strings.Trim(s, "\"`")
-	s = strings.ToLower(strings.ReplaceAll(strings.Join(strings.Fields(s), "-"), "_", "-"))
-	if s == "" {
-		return "", fmt.Errorf("ollama returned empty suggestion")
-	}
-	return s, nil
+	return strings.TrimSpace(out.Response), nil
 }
 
 type ollamaTagsResponse struct {

@@ -2,15 +2,15 @@ package cli
 
 import (
 	"context"
-	"flag"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
-	"aifa/internal/config"
-	"aifa/internal/llm"
-	"aifa/internal/models"
-	"aifa/internal/ops"
+	"aifiler/internal/config"
+	"aifiler/internal/llm"
+	"aifiler/internal/models"
 )
 
 type App struct{}
@@ -25,154 +25,138 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 0
 	}
 
-	switch args[0] {
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "help", "-h", "--help":
 		a.printHelp()
 		return 0
+	case "list":
+		return a.runList(ctx)
+	case "set":
+		return a.runSet(args[1:])
+	case "default":
+		return a.runDefault(args[1:])
+	case "reset":
+		return a.runReset(args[1:])
+	case "create":
+		return a.runCreate(ctx, args[1:])
 	case "rename":
-		return a.runRename(ctx, args[1:])
-	case "organize":
-		return a.runOrganize(ctx, args[1:])
-	case "metadata":
-		return a.runMetadata(ctx, args[1:])
-	case "models":
-		return a.runModels(ctx, args[1:])
-	case "config":
-		return a.runConfig(args[1:])
+		return a.runRenameFromPrompt(ctx, args[1:])
 	default:
-		errorStyle.Printf("Unknown command: %s\n\n", args[0])
-		a.printHelp()
-		return 1
+		return a.runDynamicPrompt(ctx, strings.Join(args, " "))
 	}
 }
 
 func (a *App) printHelp() {
-	headerStyle.Println("aifa — AI File Assistant")
-	fmt.Println("AI-powered, local-first file management copilot.")
+	headerStyle.Println("aifiler — AI File Assistant")
+	fmt.Println("AI-powered, local-first file and folder assistant.")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  aifa <command> [options]")
+	fmt.Println("  aifiler <command> [options]")
+	fmt.Println("  aifiler \"<prompt>\"")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  rename     Suggest and safely apply semantic file renames")
-	fmt.Println("  organize   Group files by semantic categories")
-	fmt.Println("  metadata   Suggest metadata updates")
-	fmt.Println("  models     View curated model registry and local Ollama models")
-	fmt.Println("  config     Initialize local configuration")
+	fmt.Println("  create \"<prompt>\"         Create files/folders from AI suggestions")
+	fmt.Println("  rename \"<prompt>\"         Rename files/folders from AI suggestions")
+	fmt.Println("  list                      List providers, models, and API key status")
+	fmt.Println("  set \"provider\" \"api key\"  Save API key for provider")
+	fmt.Println("  default \"model\"           Set default model")
+	fmt.Println("  reset \"provider\" \"api key\" Remove provider API key")
+	fmt.Println("  help                      Show this help")
 	fmt.Println()
-	fmt.Println("Safety:")
-	fmt.Println("  Operations default to dry-run. Use --apply to execute changes.")
+	fmt.Println("Examples:")
+	fmt.Println("  aifiler create \"create src and README\"")
+	fmt.Println("  aifiler rename \"rename docs to documentation folder\"")
+	fmt.Println("  aifiler \"summarize how to organize this repo\"")
 }
 
-func (a *App) runRename(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("rename", flag.ContinueOnError)
-	path := fs.String("path", ".", "file or folder to process")
-	provider := fs.String("provider", "none", "LLM provider (openai|anthropic|google|ollama|none)")
-	model := fs.String("model", "", "model name (optional, uses curated default if empty)")
-	apply := fs.Bool("apply", false, "apply changes (default is dry-run)")
-	recursive := fs.Bool("recursive", true, "walk subfolders when path is a directory")
-	maxFiles := fs.Int("max-files", 100, "maximum files to inspect")
-	if err := fs.Parse(args); err != nil {
-		errorStyle.Println(err)
+func (a *App) runCreate(ctx context.Context, args []string) int {
+	prompt := strings.TrimSpace(strings.Join(args, " "))
+	if prompt == "" {
+		errorStyle.Println("Usage: aifiler create \"<prompt>\"")
 		return 2
 	}
 
-	cfg, _ := config.LoadOrDefault()
-	registry, err := models.LoadRegistry(models.DefaultRegistryPath)
+	client, _, _, err := a.newClient("", "")
 	if err != nil {
-		errorStyle.Printf("failed to load model registry: %v\n", err)
+		errorStyle.Printf("failed to initialize model client: %v\n", err)
 		return 1
 	}
 
-	selectedModel := strings.TrimSpace(*model)
-	if selectedModel == "" {
-		selectedModel = registry.DefaultModelForProvider(*provider)
+	response, err := client.Prompt(ctx, buildCreatePrompt(prompt))
+	if err != nil {
+		errorStyle.Printf("create failed: %v\n", err)
+		return 1
 	}
 
-	client := llm.NewClient(llm.ClientOptions{
-		Provider: *provider,
-		Model:    selectedModel,
-		Config:   cfg,
-	})
+	plan, err := parsePlan(response)
+	if err != nil {
+		warnStyle.Println("Could not parse structured create plan; model response:")
+		fmt.Println(response)
+		return 0
+	}
 
-	planner := ops.NewRenamePlanner(client)
-	target := filepath.Clean(*path)
-	dryRun := !*apply
+	return applyCreatePlan(plan)
+}
 
-	result, err := planner.Plan(ctx, ops.RenamePlanInput{
-		TargetPath: target,
-		Recursive:  *recursive,
-		MaxFiles:   *maxFiles,
-		DryRun:     dryRun,
-	})
+func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
+	prompt := strings.TrimSpace(strings.Join(args, " "))
+	if prompt == "" {
+		errorStyle.Println("Usage: aifiler rename \"<prompt>\"")
+		return 2
+	}
+
+	client, _, _, err := a.newClient("", "")
+	if err != nil {
+		errorStyle.Printf("failed to initialize model client: %v\n", err)
+		return 1
+	}
+
+	response, err := client.Prompt(ctx, buildRenamePrompt(prompt))
 	if err != nil {
 		errorStyle.Printf("rename failed: %v\n", err)
 		return 1
 	}
 
-	result.Print()
-	if dryRun {
-		warnStyle.Println("Dry-run only. Re-run with --apply to execute renames.")
-	}
-	return 0
-}
-
-func (a *App) runOrganize(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("organize", flag.ContinueOnError)
-	path := fs.String("path", ".", "folder to organize")
-	apply := fs.Bool("apply", false, "apply folder moves (default is dry-run)")
-	if err := fs.Parse(args); err != nil {
-		errorStyle.Println(err)
-		return 2
-	}
-
-	planner := ops.NewOrganizer()
-	result, err := planner.Plan(ctx, ops.OrganizeInput{TargetPath: *path, DryRun: !*apply})
+	plan, err := parsePlan(response)
 	if err != nil {
-		errorStyle.Printf("organize failed: %v\n", err)
-		return 1
+		warnStyle.Println("Could not parse structured rename plan; model response:")
+		fmt.Println(response)
+		return 0
 	}
-	result.Print()
-	if !*apply {
-		warnStyle.Println("Dry-run only. Re-run with --apply to execute moves.")
-	}
-	return 0
+
+	return applyRenamePlan(plan)
 }
 
-func (a *App) runMetadata(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("metadata", flag.ContinueOnError)
-	path := fs.String("path", ".", "target path")
-	if err := fs.Parse(args); err != nil {
-		errorStyle.Println(err)
-		return 2
-	}
-
-	suggester := ops.NewMetadataSuggester()
-	result, err := suggester.Suggest(ctx, *path)
-	if err != nil {
-		errorStyle.Printf("metadata failed: %v\n", err)
-		return 1
-	}
-	result.Print()
-	return 0
-}
-
-func (a *App) runModels(ctx context.Context, args []string) int {
+func (a *App) runList(ctx context.Context) int {
 	_ = ctx
-	fs := flag.NewFlagSet("models", flag.ContinueOnError)
-	provider := fs.String("provider", "", "optional provider filter")
-	if err := fs.Parse(args); err != nil {
-		errorStyle.Println(err)
-		return 2
-	}
-
 	registry, err := models.LoadRegistry(models.DefaultRegistryPath)
 	if err != nil {
 		errorStyle.Printf("failed to load model registry: %v\n", err)
 		return 1
 	}
+	cfg, _ := config.LoadOrDefault()
 
-	registry.Print(*provider)
+	headerStyle.Println("Available providers and models")
+	registry.Print("")
+
+	fmt.Println()
+	headerStyle.Println("Configured API keys")
+	if len(cfg.APIKeys) == 0 {
+		fmt.Println("- none")
+	} else {
+		for provider, key := range cfg.APIKeys {
+			status := "not-set"
+			if strings.TrimSpace(key) != "" {
+				status = "set"
+			}
+			fmt.Printf("- %s: %s\n", provider, status)
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("default_provider: %s\n", cfg.DefaultProvider)
+	fmt.Printf("default_model: %s\n", cfg.DefaultModel)
+
 	ollamaModels, err := llm.DetectOllamaModels(context.Background())
 	if err == nil && len(ollamaModels) > 0 {
 		fmt.Println()
@@ -184,24 +168,343 @@ func (a *App) runModels(ctx context.Context, args []string) int {
 	return 0
 }
 
-func (a *App) runConfig(args []string) int {
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	initFlag := fs.Bool("init", false, "create a default config file")
-	if err := fs.Parse(args); err != nil {
-		errorStyle.Println(err)
+func (a *App) runSet(args []string) int {
+	if len(args) < 2 {
+		errorStyle.Println("Usage: aifiler set \"provider\" \"api key\"")
+		return 2
+	}
+	provider := strings.ToLower(strings.TrimSpace(args[0]))
+	apiKey := strings.TrimSpace(args[1])
+	if provider == "" || apiKey == "" {
+		errorStyle.Println("provider and api key cannot be empty")
 		return 2
 	}
 
-	if !*initFlag {
-		fmt.Println("Usage: aifa config --init")
+	cfg, _ := config.LoadOrDefault()
+	if cfg.APIKeys == nil {
+		cfg.APIKeys = map[string]string{}
+	}
+	cfg.APIKeys[provider] = apiKey
+	if strings.TrimSpace(cfg.DefaultProvider) == "" || cfg.DefaultProvider == "none" {
+		cfg.DefaultProvider = provider
+	}
+
+	path, err := config.Save(cfg)
+	if err != nil {
+		errorStyle.Printf("failed to save config: %v\n", err)
+		return 1
+	}
+	successStyle.Printf("Saved API key for provider '%s' in %s\n", provider, path)
+	return 0
+}
+
+func (a *App) runDefault(args []string) int {
+	if len(args) < 1 {
+		errorStyle.Println("Usage: aifiler default \"model\"")
+		return 2
+	}
+	model := strings.TrimSpace(strings.Join(args, " "))
+	if model == "" {
+		errorStyle.Println("model cannot be empty")
+		return 2
+	}
+
+	cfg, _ := config.LoadOrDefault()
+	cfg.DefaultModel = model
+	path, err := config.Save(cfg)
+	if err != nil {
+		errorStyle.Printf("failed to save config: %v\n", err)
+		return 1
+	}
+	successStyle.Printf("Default model set to '%s' in %s\n", model, path)
+	return 0
+}
+
+func (a *App) runReset(args []string) int {
+	if len(args) < 2 {
+		errorStyle.Println("Usage: aifiler reset \"provider\" \"api key\"")
+		return 2
+	}
+	provider := strings.ToLower(strings.TrimSpace(args[0]))
+	apiKey := strings.TrimSpace(args[1])
+	if provider == "" || apiKey == "" {
+		errorStyle.Println("provider and api key cannot be empty")
+		return 2
+	}
+
+	cfg, _ := config.LoadOrDefault()
+	current := strings.TrimSpace(cfg.APIKeys[provider])
+	if current == "" {
+		warnStyle.Printf("No API key found for provider '%s'\n", provider)
+		return 0
+	}
+	if apiKey != "*" && apiKey != current {
+		errorStyle.Printf("Provided api key does not match the stored key for provider '%s'\n", provider)
+		return 1
+	}
+
+	cfg.APIKeys[provider] = ""
+	if cfg.DefaultProvider == provider {
+		cfg.DefaultProvider = "none"
+	}
+
+	path, err := config.Save(cfg)
+	if err != nil {
+		errorStyle.Printf("failed to save config: %v\n", err)
+		return 1
+	}
+	successStyle.Printf("API key reset for provider '%s' in %s\n", provider, path)
+	return 0
+}
+
+func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		a.printHelp()
 		return 0
 	}
 
-	path, err := config.InitDefault()
+	client, provider, model, err := a.newClient("", "")
 	if err != nil {
-		errorStyle.Printf("failed to init config: %v\n", err)
+		errorStyle.Printf("failed to initialize model client: %v\n", err)
 		return 1
 	}
-	successStyle.Printf("Config created: %s\n", path)
+
+	response, err := client.Prompt(ctx, prompt)
+	if err != nil {
+		errorStyle.Printf("model request failed: %v\n", err)
+		return 1
+	}
+	mutedStyle.Printf("provider=%s model=%s\n", provider, model)
+	fmt.Println(response)
 	return 0
+}
+
+func (a *App) newClient(providerOverride, modelOverride string) (llm.Client, string, string, error) {
+	cfg, _ := config.LoadOrDefault()
+	registry, err := models.LoadRegistry(models.DefaultRegistryPath)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	provider := strings.TrimSpace(providerOverride)
+	if provider == "" {
+		provider = strings.TrimSpace(cfg.DefaultProvider)
+	}
+	if provider == "" {
+		provider = "none"
+	}
+
+	model := strings.TrimSpace(modelOverride)
+	if model == "" {
+		model = strings.TrimSpace(cfg.DefaultModel)
+	}
+	if model == "" {
+		model = registry.DefaultModelForProvider(provider)
+	}
+
+	client := llm.NewClient(llm.ClientOptions{
+		Provider: provider,
+		Model:    model,
+		Config:   cfg,
+	})
+	return client, provider, model, nil
+}
+
+type aiPlan struct {
+	Operations []aiOperation `json:"operations"`
+}
+
+type aiOperation struct {
+	Type    string `json:"type"`
+	Path    string `json:"path"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Content string `json:"content"`
+}
+
+func buildCreatePrompt(userPrompt string) string {
+	return fmt.Sprintf(`You convert requests into filesystem operations.
+Return STRICT JSON only in this format:
+{"operations":[{"type":"create_dir|create_file","path":"relative/path","content":"optional"}]}
+Rules:
+- paths must be relative
+- no explanation text
+- no markdown fences
+User request: %s`, userPrompt)
+}
+
+func buildRenamePrompt(userPrompt string) string {
+	return fmt.Sprintf(`You convert requests into filesystem rename operations.
+Return STRICT JSON only in this format:
+{"operations":[{"type":"rename","from":"relative/path","to":"relative/path"}]}
+Rules:
+- paths must be relative
+- no explanation text
+- no markdown fences
+User request: %s`, userPrompt)
+}
+
+func parsePlan(response string) (aiPlan, error) {
+	trimmed := strings.TrimSpace(response)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimPrefix(trimmed, "json")
+		trimmed = strings.TrimSpace(trimmed)
+		trimmed = strings.TrimSuffix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+	}
+
+	var plan aiPlan
+	if err := json.Unmarshal([]byte(trimmed), &plan); err != nil {
+		return aiPlan{}, err
+	}
+	return plan, nil
+}
+
+func applyCreatePlan(plan aiPlan) int {
+	if len(plan.Operations) == 0 {
+		warnStyle.Println("No create operations suggested.")
+		return 0
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		errorStyle.Printf("failed to get current folder: %v\n", err)
+		return 1
+	}
+
+	headerStyle.Println("Applied create operations")
+	hadError := false
+	for _, op := range plan.Operations {
+		typ := strings.ToLower(strings.TrimSpace(op.Type))
+		target, err := resolvePath(cwd, op.Path)
+		if err != nil {
+			errorStyle.Printf("- %s: %v\n", op.Path, err)
+			hadError = true
+			continue
+		}
+
+		switch typ {
+		case "create_dir", "mkdir":
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				errorStyle.Printf("- create_dir %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			successStyle.Printf("- created dir: %s\n", op.Path)
+		case "create_file", "write_file", "touch":
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				errorStyle.Printf("- prepare dir for %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			if _, err := os.Stat(target); err == nil {
+				warnStyle.Printf("- skipped existing file: %s\n", op.Path)
+				continue
+			}
+			if err := os.WriteFile(target, []byte(op.Content), 0o644); err != nil {
+				errorStyle.Printf("- create_file %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			successStyle.Printf("- created file: %s\n", op.Path)
+		default:
+			warnStyle.Printf("- skipped unknown op type: %s\n", op.Type)
+		}
+	}
+
+	if hadError {
+		return 1
+	}
+	return 0
+}
+
+func applyRenamePlan(plan aiPlan) int {
+	if len(plan.Operations) == 0 {
+		warnStyle.Println("No rename operations suggested.")
+		return 0
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		errorStyle.Printf("failed to get current folder: %v\n", err)
+		return 1
+	}
+
+	headerStyle.Println("Applied rename operations")
+	hadError := false
+	for _, op := range plan.Operations {
+		typ := strings.ToLower(strings.TrimSpace(op.Type))
+		if typ != "rename" && typ != "move" {
+			warnStyle.Printf("- skipped unknown op type: %s\n", op.Type)
+			continue
+		}
+
+		fromPath := strings.TrimSpace(op.From)
+		if fromPath == "" {
+			fromPath = strings.TrimSpace(op.Path)
+		}
+		toPath := strings.TrimSpace(op.To)
+		from, err := resolvePath(cwd, fromPath)
+		if err != nil {
+			errorStyle.Printf("- invalid from path '%s': %v\n", fromPath, err)
+			hadError = true
+			continue
+		}
+		to, err := resolvePath(cwd, toPath)
+		if err != nil {
+			errorStyle.Printf("- invalid to path '%s': %v\n", toPath, err)
+			hadError = true
+			continue
+		}
+
+		if _, err := os.Stat(from); err != nil {
+			errorStyle.Printf("- source missing: %s\n", fromPath)
+			hadError = true
+			continue
+		}
+		if _, err := os.Stat(to); err == nil {
+			errorStyle.Printf("- target exists: %s\n", toPath)
+			hadError = true
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			errorStyle.Printf("- create target dir for %s: %v\n", toPath, err)
+			hadError = true
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			errorStyle.Printf("- rename %s -> %s failed: %v\n", fromPath, toPath, err)
+			hadError = true
+			continue
+		}
+		successStyle.Printf("- renamed: %s -> %s\n", fromPath, toPath)
+	}
+
+	if hadError {
+		return 1
+	}
+	return 0
+}
+
+func resolvePath(cwd, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	target := value
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(cwd, target)
+	}
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(cwd, target)
+	if err != nil {
+		return "", err
+	}
+	rel = filepath.Clean(rel)
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes current directory")
+	}
+	return target, nil
 }

@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"aifa/internal/config"
+	"aifiler/internal/config"
 )
 
 type Client interface {
 	SuggestName(ctx context.Context, originalName string, contextHint string) (string, error)
+	Prompt(ctx context.Context, prompt string) (string, error)
 }
 
 type ClientOptions struct {
@@ -42,4 +43,13 @@ func (c *DeterministicClient) SuggestName(ctx context.Context, originalName stri
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, " ", "-")
 	return name, nil
+}
+
+func (c *DeterministicClient) Prompt(ctx context.Context, prompt string) (string, error) {
+	_ = ctx
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", fmt.Errorf("empty prompt")
+	}
+	return "Provider is set to 'none'. Configure a real provider with: aifiler set \"provider\" \"api-key\"", nil
 }

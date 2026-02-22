@@ -1,4 +1,4 @@
-module aifa
+module aifiler
 
 go 1.22
 

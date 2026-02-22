@@ -1,4 +1,4 @@
-project_name: aifa
+project_name: aifiler
 
 before:
   hooks:
@@ -6,9 +6,9 @@ before:
     - go test ./...
 
 builds:
-  - id: aifa
-    main: ./cmd/aifa
-    binary: aifa
+  - id: aifiler
+    main: ./cmd/aifiler
+    binary: aifiler
     env:
       - CGO_ENABLED=0
     goos:
@@ -31,24 +31,22 @@ release:
   draft: true
 
 chocolateys:
-  - name: aifa
+  - name: aifiler
     title: AI File Assistant
-    authors: AIFA Contributors
-    project_url: https://github.com/your-org/aifa
-    url_template: "https://github.com/your-org/aifa/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    icon_url: https://raw.githubusercontent.com/your-org/aifa/main/.github/icon.png
+    authors: Aifiler Contributors
+    project_url: https://github.com/JoshiMinh/aifiler
+    url_template: "https://github.com/JoshiMinh/aifiler/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     description: AI-powered local-first file management copilot.
-    license_url: https://github.com/your-org/aifa/blob/main/LICENSE
     summary: Semantic file management with safety-first dry-runs.
     tags: "ai files cli local"
 
 scoops:
-  - name: aifa
+  - name: aifiler
     repository:
-      owner: your-org
+      owner: JoshiMinh
       name: scoop-bucket
       branch: main
       token: "{{ .Env.SCOOP_GITHUB_TOKEN }}"
-    homepage: https://github.com/your-org/aifa
+    homepage: https://github.com/JoshiMinh/aifiler
     description: AI-powered local-first file management copilot.
     license: MIT
