@@ -12,18 +12,19 @@ import (
 
 const ollamaBaseURL = "http://127.0.0.1:11434"
 
+var ollamaGenerateHTTPClient = &http.Client{Timeout: 20 * time.Second}
+var ollamaTagsHTTPClient = &http.Client{Timeout: 4 * time.Second}
+
 type OllamaClient struct {
 	Model string
 }
 
 func (c *OllamaClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	response, err := c.Prompt(ctx, fmt.Sprintf("Suggest a concise kebab-case filename stem for: %q. Context: %s. Return only the filename stem.", originalName, contextHint))
+	response, err := c.Prompt(ctx, buildFilenameSuggestionPrompt(originalName, contextHint))
 	if err != nil {
 		return "", err
 	}
-	s := strings.TrimSpace(response)
-	s = strings.Trim(s, "\"`")
-	s = strings.ToLower(strings.ReplaceAll(strings.Join(strings.Fields(s), "-"), "_", "-"))
+	s := normalizeSuggestion(response)
 	if s == "" {
 		return "", fmt.Errorf("ollama returned empty suggestion")
 	}
@@ -53,8 +54,7 @@ func (c *OllamaClient) Prompt(ctx context.Context, prompt string) (string, error
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	httpClient := &http.Client{Timeout: 20 * time.Second}
-	resp, err := httpClient.Do(req)
+	resp, err := ollamaGenerateHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -85,8 +85,7 @@ func DetectOllamaModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	httpClient := &http.Client{Timeout: 4 * time.Second}
-	resp, err := httpClient.Do(req)
+	resp, err := ollamaTagsHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

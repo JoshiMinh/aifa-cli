@@ -24,6 +24,12 @@ func NewClient(opts ClientOptions) Client {
 	switch provider {
 	case "ollama":
 		return &OllamaClient{Model: opts.Model}
+	case "vercel":
+		apiKey := ""
+		if opts.Config.APIKeys != nil {
+			apiKey = strings.TrimSpace(opts.Config.APIKeys["vercel"])
+		}
+		return &VercelGatewayClient{Model: opts.Model, APIKey: apiKey}
 	default:
 		return &DeterministicClient{}
 	}

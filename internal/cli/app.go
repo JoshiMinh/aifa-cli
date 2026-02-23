@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"aifiler/internal/config"
@@ -29,6 +30,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "help", "-h", "--help":
 		a.printHelp()
 		return 0
+	case "doctor":
+		return a.runDoctor()
 	case "list":
 		return a.runList(ctx)
 	case "set":
@@ -61,12 +64,19 @@ func (a *App) printHelp() {
 	fmt.Println("  set \"provider\" \"api key\"  Save API key for provider")
 	fmt.Println("  default \"model\"           Set default model")
 	fmt.Println("  reset \"provider\" \"api key\" Remove provider API key")
+	fmt.Println("  doctor                    Show runtime diagnostics")
 	fmt.Println("  help                      Show this help")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  aifiler create \"create src and README\"")
 	fmt.Println("  aifiler rename \"rename docs to documentation folder\"")
+	fmt.Println("  aifiler doctor")
 	fmt.Println("  aifiler \"summarize how to organize this repo\"")
+	fmt.Println()
+	fmt.Println("Vercel quick setup:")
+	fmt.Println("  aifiler set \"vercel\" \"<ai-gateway-api-key>\"")
+	fmt.Println("  aifiler default \"openai/gpt-4o-mini\"")
+	fmt.Println("  aifiler list")
 }
 
 func (a *App) runCreate(ctx context.Context, args []string) int {
@@ -128,8 +138,7 @@ func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
 }
 
 func (a *App) runList(ctx context.Context) int {
-	_ = ctx
-	registry, err := models.LoadRegistry(models.DefaultRegistryPath)
+	registry, err := models.LoadDefaultRegistry()
 	if err != nil {
 		errorStyle.Printf("failed to load model registry: %v\n", err)
 		return 1
@@ -141,12 +150,33 @@ func (a *App) runList(ctx context.Context) int {
 
 	fmt.Println()
 	headerStyle.Println("Configured API keys")
-	if len(cfg.APIKeys) == 0 {
+	providers := make([]string, 0, len(registry.Providers)+len(cfg.APIKeys))
+	providerSet := map[string]struct{}{}
+	for provider := range registry.Providers {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" || provider == "none" {
+			continue
+		}
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range cfg.APIKeys {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" {
+			continue
+		}
+		providerSet[provider] = struct{}{}
+	}
+	for provider := range providerSet {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+
+	if len(providers) == 0 {
 		fmt.Println("- none")
 	} else {
-		for provider, key := range cfg.APIKeys {
+		for _, provider := range providers {
 			status := "not-set"
-			if strings.TrimSpace(key) != "" {
+			if strings.TrimSpace(cfg.APIKeys[provider]) != "" {
 				status = "set"
 			}
 			fmt.Printf("- %s: %s\n", provider, status)
@@ -157,7 +187,7 @@ func (a *App) runList(ctx context.Context) int {
 	fmt.Printf("default_provider: %s\n", cfg.DefaultProvider)
 	fmt.Printf("default_model: %s\n", cfg.DefaultModel)
 
-	ollamaModels, err := llm.DetectOllamaModels(context.Background())
+	ollamaModels, err := llm.DetectOllamaModels(ctx)
 	if err == nil && len(ollamaModels) > 0 {
 		fmt.Println()
 		headerStyle.Println("Detected local Ollama models")
@@ -165,6 +195,42 @@ func (a *App) runList(ctx context.Context) int {
 			fmt.Printf("  - %s\n", model)
 		}
 	}
+
+	vercelModels, err := llm.DetectVercelModels(ctx, cfg.APIKeys["vercel"], "")
+	if err == nil && len(vercelModels) > 0 {
+		fmt.Println()
+		headerStyle.Println("Detected Vercel AI Gateway models")
+		for _, model := range vercelModels {
+			fmt.Printf("  - %s\n", model)
+		}
+	}
+	return 0
+}
+
+func (a *App) runDoctor() int {
+	headerStyle.Println("aifiler diagnostics")
+
+	if cwd, err := os.Getwd(); err == nil {
+		fmt.Printf("cwd: %s\n", cwd)
+	}
+	if exePath, err := os.Executable(); err == nil {
+		fmt.Printf("executable: %s\n", exePath)
+	}
+
+	configured := strings.TrimSpace(os.Getenv(models.RegistryPathEnvVar))
+	if configured == "" {
+		fmt.Printf("%s: (not set)\n", models.RegistryPathEnvVar)
+	} else {
+		fmt.Printf("%s: %s\n", models.RegistryPathEnvVar, configured)
+	}
+
+	resolved, err := models.ResolveRegistryPath(models.DefaultRegistryPath)
+	if err != nil {
+		errorStyle.Printf("registry: unresolved (%v)\n", err)
+		return 1
+	}
+
+	successStyle.Printf("registry: %s\n", resolved)
 	return 0
 }
 
@@ -282,7 +348,7 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 
 func (a *App) newClient(providerOverride, modelOverride string) (llm.Client, string, string, error) {
 	cfg, _ := config.LoadOrDefault()
-	registry, err := models.LoadRegistry(models.DefaultRegistryPath)
+	registry, err := models.LoadDefaultRegistry()
 	if err != nil {
 		return nil, "", "", err
 	}

@@ -90,6 +90,7 @@ func Default() Config {
 			"openai":    "",
 			"anthropic": "",
 			"google":    "",
+			"vercel":    "",
 		},
 	}
 }

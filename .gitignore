@@ -1,6 +1,8 @@
 # Go build artifacts
 /bin/
 /dist/
+/aifiler
+/aifiler.exe
 *.exe
 *.exe~
 *.dll
@@ -8,9 +10,6 @@
 *.dylib
 *.test
 *.out
-
-aifa
-aifa.exe
 
 # Go coverage
 coverage.out
