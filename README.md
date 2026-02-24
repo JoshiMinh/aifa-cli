@@ -14,6 +14,8 @@ It can generate create/rename plans from prompts, execute those plans in your cu
 - 🧠 Prompt-based file/folder creation (`create`)
 - 🏷️ Prompt-based file/folder renaming (`rename`)
 - 💬 Free-form dynamic prompts (`aifiler "..."`)
+- 🗂️ Automatic workspace structure context (no manual folder description needed)
+- ✅ Approval-gated execution for file/folder updates and shell commands
 - 🔌 Multi-provider support (`ollama`, `vercel`, fallback `none`)
 - 📚 Curated model registry + auto-detected model lists
 - ⚙️ Simple provider key and default model management
@@ -62,7 +64,12 @@ go build -o aifiler ./cmd/aifiler
 | `aifiler doctor`                     | Show runtime diagnostics (registry resolution, paths)       |
 | `aifiler create "<prompt>"`          | Create files/folders from AI plan                           |
 | `aifiler rename "<prompt>"`          | Rename files/folders from AI plan                           |
-| `aifiler "<prompt>"`                 | Run dynamic prompt directly                                 |
+| `aifiler "<prompt>"`                 | Run dynamic prompt; can propose/execute actions with approval |
+
+Notes:
+- Prompts automatically include a snapshot of the current working folder structure.
+- Any mutating action (create/update/rename/run command) is shown first and only executed after user approval.
+- At the proposal prompt, you can type `y`/`n` or directly type the next prompt to refine the plan in-place.
 
 ---
 

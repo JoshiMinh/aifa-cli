@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"aifiler/internal/config"
 	"aifiler/internal/llm"
@@ -58,7 +63,7 @@ func (a *App) printHelp() {
 	fmt.Println("  aifiler \"<prompt>\"")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  create \"<prompt>\"         Create files/folders from AI suggestions")
+	fmt.Println("  create \"<prompt>\"         Create/update files/folders from AI suggestions")
 	fmt.Println("  rename \"<prompt>\"         Rename files/folders from AI suggestions")
 	fmt.Println("  list                      List providers, models, and API key status")
 	fmt.Println("  set \"provider\" \"api key\"  Save API key for provider")
@@ -66,6 +71,10 @@ func (a *App) printHelp() {
 	fmt.Println("  reset \"provider\" \"api key\" Remove provider API key")
 	fmt.Println("  doctor                    Show runtime diagnostics")
 	fmt.Println("  help                      Show this help")
+	fmt.Println()
+	fmt.Println("Behavior:")
+	fmt.Println("  - Prompts automatically include current workspace structure")
+	fmt.Println("  - Any file/folder/command action requires approval before execution")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  aifiler create \"create src and README\"")
@@ -80,8 +89,8 @@ func (a *App) printHelp() {
 }
 
 func (a *App) runCreate(ctx context.Context, args []string) int {
-	prompt := strings.TrimSpace(strings.Join(args, " "))
-	if prompt == "" {
+	currentPrompt := strings.TrimSpace(strings.Join(args, " "))
+	if currentPrompt == "" {
 		errorStyle.Println("Usage: aifiler create \"<prompt>\"")
 		return 2
 	}
@@ -92,25 +101,34 @@ func (a *App) runCreate(ctx context.Context, args []string) int {
 		return 1
 	}
 
-	response, err := client.Prompt(ctx, buildCreatePrompt(prompt))
-	if err != nil {
-		errorStyle.Printf("create failed: %v\n", err)
-		return 1
-	}
+	for {
+		workspaceContext := buildWorkspaceContext()
+		thinking := startThinking("AI is thinking")
+		response, err := client.Prompt(ctx, buildCreatePrompt(currentPrompt, workspaceContext))
+		thinking.stop("AI response ready")
+		if err != nil {
+			errorStyle.Printf("create failed: %v\n", err)
+			return 1
+		}
 
-	plan, err := parsePlan(response)
-	if err != nil {
-		warnStyle.Println("Could not parse structured create plan; model response:")
-		fmt.Println(response)
-		return 0
-	}
+		plan, err := parsePlan(response)
+		if err != nil {
+			warnStyle.Println("Could not parse structured create plan; model response:")
+			fmt.Println(response)
+			return 0
+		}
 
-	return applyCreatePlan(plan)
+		result := applyPlanWithApproval(plan)
+		if strings.TrimSpace(result.NextPrompt) == "" {
+			return result.ExitCode
+		}
+		currentPrompt = strings.TrimSpace(result.NextPrompt)
+	}
 }
 
 func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
-	prompt := strings.TrimSpace(strings.Join(args, " "))
-	if prompt == "" {
+	currentPrompt := strings.TrimSpace(strings.Join(args, " "))
+	if currentPrompt == "" {
 		errorStyle.Println("Usage: aifiler rename \"<prompt>\"")
 		return 2
 	}
@@ -121,20 +139,29 @@ func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
 		return 1
 	}
 
-	response, err := client.Prompt(ctx, buildRenamePrompt(prompt))
-	if err != nil {
-		errorStyle.Printf("rename failed: %v\n", err)
-		return 1
-	}
+	for {
+		workspaceContext := buildWorkspaceContext()
+		thinking := startThinking("AI is thinking")
+		response, err := client.Prompt(ctx, buildRenamePrompt(currentPrompt, workspaceContext))
+		thinking.stop("AI response ready")
+		if err != nil {
+			errorStyle.Printf("rename failed: %v\n", err)
+			return 1
+		}
 
-	plan, err := parsePlan(response)
-	if err != nil {
-		warnStyle.Println("Could not parse structured rename plan; model response:")
-		fmt.Println(response)
-		return 0
-	}
+		plan, err := parsePlan(response)
+		if err != nil {
+			warnStyle.Println("Could not parse structured rename plan; model response:")
+			fmt.Println(response)
+			return 0
+		}
 
-	return applyRenamePlan(plan)
+		result := applyPlanWithApproval(plan)
+		if strings.TrimSpace(result.NextPrompt) == "" {
+			return result.ExitCode
+		}
+		currentPrompt = strings.TrimSpace(result.NextPrompt)
+	}
 }
 
 func (a *App) runList(ctx context.Context) int {
@@ -324,8 +351,8 @@ func (a *App) runReset(args []string) int {
 }
 
 func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	currentPrompt := strings.TrimSpace(prompt)
+	if currentPrompt == "" {
 		a.printHelp()
 		return 0
 	}
@@ -336,14 +363,47 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 		return 1
 	}
 
-	response, err := client.Prompt(ctx, prompt)
-	if err != nil {
-		errorStyle.Printf("model request failed: %v\n", err)
-		return 1
+	for {
+		workspaceContext := buildWorkspaceContext()
+		thinking := startThinking("AI is thinking")
+		response, err := client.Prompt(ctx, buildDynamicPrompt(currentPrompt, workspaceContext))
+		thinking.stop("AI response ready")
+		if err != nil {
+			errorStyle.Printf("model request failed: %v\n", err)
+			return 1
+		}
+
+		plan, parseErr := parsePlan(response)
+		if parseErr != nil {
+			coerceThinking := startThinking("AI is restructuring response as plan")
+			coerced, coerceErr := client.Prompt(ctx, buildPlanCoercionPrompt(currentPrompt, response))
+			coerceThinking.stop("Plan conversion ready")
+			if coerceErr == nil {
+				if repairedPlan, repairedErr := parsePlan(coerced); repairedErr == nil {
+					plan = repairedPlan
+					parseErr = nil
+				}
+			}
+		}
+
+		mutedStyle.Printf("provider=%s model=%s\n", provider, model)
+		if parseErr == nil && len(plan.Operations) > 0 {
+			result := applyPlanWithApproval(plan)
+			if strings.TrimSpace(result.NextPrompt) == "" {
+				return result.ExitCode
+			}
+			currentPrompt = strings.TrimSpace(result.NextPrompt)
+			continue
+		}
+		if parseErr == nil && len(plan.Operations) == 0 {
+			warnStyle.Println("No operations proposed for this prompt.")
+			fmt.Println("Try a more specific prompt or request a concrete file/folder change.")
+			return 0
+		}
+
+		fmt.Println(response)
+		return 0
 	}
-	mutedStyle.Printf("provider=%s model=%s\n", provider, model)
-	fmt.Println(response)
-	return 0
 }
 
 func (a *App) newClient(providerOverride, modelOverride string) (llm.Client, string, string, error) {
@@ -387,28 +447,65 @@ type aiOperation struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Content string `json:"content"`
+	Command string `json:"command"`
 }
 
-func buildCreatePrompt(userPrompt string) string {
+func buildCreatePrompt(userPrompt, workspaceContext string) string {
 	return fmt.Sprintf(`You convert requests into filesystem operations.
 Return STRICT JSON only in this format:
-{"operations":[{"type":"create_dir|create_file","path":"relative/path","content":"optional"}]}
+{"operations":[{"type":"create_dir|create_file|update_file|rename|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
 Rules:
-- paths must be relative
+- infer file/folder targets from workspace context; do not ask user to describe structure
+- paths must be relative and within current directory
+- use update_file when modifying an existing file
+- use run_command only when necessary and keep commands non-interactive
 - no explanation text
 - no markdown fences
-User request: %s`, userPrompt)
+Workspace context:
+%s
+User request: %s`, workspaceContext, userPrompt)
 }
 
-func buildRenamePrompt(userPrompt string) string {
+func buildRenamePrompt(userPrompt, workspaceContext string) string {
 	return fmt.Sprintf(`You convert requests into filesystem rename operations.
 Return STRICT JSON only in this format:
-{"operations":[{"type":"rename","from":"relative/path","to":"relative/path"}]}
+{"operations":[{"type":"rename|run_command","from":"relative/path","to":"relative/path","command":"optional"}]}
 Rules:
-- paths must be relative
+- infer file/folder targets from workspace context; do not ask user to describe structure
+- paths must be relative and within current directory
 - no explanation text
 - no markdown fences
-User request: %s`, userPrompt)
+Workspace context:
+%s
+User request: %s`, workspaceContext, userPrompt)
+}
+
+func buildDynamicPrompt(userPrompt, workspaceContext string) string {
+	return fmt.Sprintf(`You are operating in a local workspace.
+If the user request requires filesystem or command actions, return STRICT JSON only in this format:
+{"operations":[{"type":"create_dir|create_file|update_file|rename|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
+If the request is informational only, return a normal text response.
+Rules for action plans:
+- infer file/folder targets from workspace context; do not ask user to describe structure
+- paths must be relative and within current directory
+- use update_file when modifying existing files
+- use run_command only when necessary and keep commands non-interactive
+- no markdown fences when returning JSON
+Workspace context:
+%s
+User request: %s`, workspaceContext, userPrompt)
+}
+
+func buildPlanCoercionPrompt(userPrompt, modelResponse string) string {
+	return fmt.Sprintf(`Convert the following into STRICT JSON only in this exact format:
+{"operations":[{"type":"create_dir|create_file|update_file|rename|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
+Rules:
+- no explanation text
+- no markdown fences
+- paths must be relative
+User request: %s
+Previous response to convert:
+%s`, userPrompt, modelResponse)
 }
 
 func parsePlan(response string) (aiPlan, error) {
@@ -421,6 +518,12 @@ func parsePlan(response string) (aiPlan, error) {
 		trimmed = strings.TrimSpace(trimmed)
 	}
 
+	if !strings.HasPrefix(trimmed, "{") {
+		if candidate := extractFirstJSONObject(trimmed); candidate != "" {
+			trimmed = candidate
+		}
+	}
+
 	var plan aiPlan
 	if err := json.Unmarshal([]byte(trimmed), &plan); err != nil {
 		return aiPlan{}, err
@@ -428,38 +531,87 @@ func parsePlan(response string) (aiPlan, error) {
 	return plan, nil
 }
 
-func applyCreatePlan(plan aiPlan) int {
+func extractFirstJSONObject(input string) string {
+	start := strings.Index(input, "{")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(input); i++ {
+		switch input[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(input[start : i+1])
+			}
+		}
+	}
+	return ""
+}
+
+type planApplyResult struct {
+	ExitCode   int
+	NextPrompt string
+}
+
+func applyPlanWithApproval(plan aiPlan) planApplyResult {
 	if len(plan.Operations) == 0 {
-		warnStyle.Println("No create operations suggested.")
-		return 0
+		warnStyle.Println("No operations suggested.")
+		return planApplyResult{ExitCode: 0}
 	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		errorStyle.Printf("failed to get current folder: %v\n", err)
-		return 1
+		return planApplyResult{ExitCode: 1}
 	}
 
-	headerStyle.Println("Applied create operations")
+	headerStyle.Println("Proposed operations")
+	for i, op := range plan.Operations {
+		renderOperationLine(i+1, op)
+	}
+
+	fmt.Println()
+	headerStyle.Println("Proposed tree")
+	renderProposedTree(plan)
+
+	decision := promptApplyDecision("Apply these operations")
+	if decision.Approve == false {
+		if strings.TrimSpace(decision.NextPrompt) != "" {
+			return planApplyResult{ExitCode: 0, NextPrompt: decision.NextPrompt}
+		}
+		warnStyle.Println("Plan was not approved. No changes were made.")
+		return planApplyResult{ExitCode: 0}
+	}
+
+	headerStyle.Println("Applying operations")
 	hadError := false
 	for _, op := range plan.Operations {
 		typ := strings.ToLower(strings.TrimSpace(op.Type))
-		target, err := resolvePath(cwd, op.Path)
-		if err != nil {
-			errorStyle.Printf("- %s: %v\n", op.Path, err)
-			hadError = true
-			continue
-		}
 
 		switch typ {
 		case "create_dir", "mkdir":
+			target, err := resolvePath(cwd, op.Path)
+			if err != nil {
+				errorStyle.Printf("- %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				errorStyle.Printf("- create_dir %s: %v\n", op.Path, err)
 				hadError = true
 				continue
 			}
 			successStyle.Printf("- created dir: %s\n", op.Path)
-		case "create_file", "write_file", "touch":
+		case "create_file", "touch":
+			target, err := resolvePath(cwd, op.Path)
+			if err != nil {
+				errorStyle.Printf("- %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				errorStyle.Printf("- prepare dir for %s: %v\n", op.Path, err)
 				hadError = true
@@ -475,83 +627,211 @@ func applyCreatePlan(plan aiPlan) int {
 				continue
 			}
 			successStyle.Printf("- created file: %s\n", op.Path)
+		case "update_file", "write_file":
+			target, err := resolvePath(cwd, op.Path)
+			if err != nil {
+				errorStyle.Printf("- %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				errorStyle.Printf("- prepare dir for %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			if err := os.WriteFile(target, []byte(op.Content), 0o644); err != nil {
+				errorStyle.Printf("- update_file %s: %v\n", op.Path, err)
+				hadError = true
+				continue
+			}
+			successStyle.Printf("- updated file: %s\n", op.Path)
+		case "rename", "move":
+			fromPath := strings.TrimSpace(op.From)
+			if fromPath == "" {
+				fromPath = strings.TrimSpace(op.Path)
+			}
+			toPath := strings.TrimSpace(op.To)
+			from, err := resolvePath(cwd, fromPath)
+			if err != nil {
+				errorStyle.Printf("- invalid from path '%s': %v\n", fromPath, err)
+				hadError = true
+				continue
+			}
+			to, err := resolvePath(cwd, toPath)
+			if err != nil {
+				errorStyle.Printf("- invalid to path '%s': %v\n", toPath, err)
+				hadError = true
+				continue
+			}
+
+			if _, err := os.Stat(from); err != nil {
+				errorStyle.Printf("- source missing: %s\n", fromPath)
+				hadError = true
+				continue
+			}
+			if _, err := os.Stat(to); err == nil {
+				errorStyle.Printf("- target exists: %s\n", toPath)
+				hadError = true
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+				errorStyle.Printf("- create target dir for %s: %v\n", toPath, err)
+				hadError = true
+				continue
+			}
+			if err := os.Rename(from, to); err != nil {
+				errorStyle.Printf("- rename %s -> %s failed: %v\n", fromPath, toPath, err)
+				hadError = true
+				continue
+			}
+			successStyle.Printf("- renamed: %s -> %s\n", fromPath, toPath)
+		case "run_command":
+			command := strings.TrimSpace(op.Command)
+			if command == "" {
+				warnStyle.Println("- skipped empty command")
+				continue
+			}
+			if !confirmApproval(fmt.Sprintf("Run command '%s'", command)) {
+				warnStyle.Printf("- skipped command: %s\n", command)
+				continue
+			}
+			if err := runCommand(cwd, command); err != nil {
+				errorStyle.Printf("- command failed: %s (%v)\n", command, err)
+				hadError = true
+				continue
+			}
+			successStyle.Printf("- command succeeded: %s\n", command)
 		default:
 			warnStyle.Printf("- skipped unknown op type: %s\n", op.Type)
 		}
 	}
 
 	if hadError {
-		return 1
+		return planApplyResult{ExitCode: 1}
 	}
-	return 0
+	return planApplyResult{ExitCode: 0}
 }
 
-func applyRenamePlan(plan aiPlan) int {
-	if len(plan.Operations) == 0 {
-		warnStyle.Println("No rename operations suggested.")
-		return 0
-	}
+type applyDecision struct {
+	Approve    bool
+	NextPrompt string
+}
 
+func promptApplyDecision(message string) applyDecision {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("%s? [y/N or type next prompt]: ", message)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return applyDecision{}
+	}
+	choice := strings.TrimSpace(input)
+	lowerChoice := strings.ToLower(choice)
+	if lowerChoice == "y" || lowerChoice == "yes" {
+		return applyDecision{Approve: true}
+	}
+	if lowerChoice == "n" || lowerChoice == "no" || lowerChoice == "" {
+		return applyDecision{}
+	}
+	return applyDecision{NextPrompt: choice}
+}
+
+func confirmApproval(message string) bool {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("%s? [y/N]: ", message)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	choice := strings.ToLower(strings.TrimSpace(input))
+	return choice == "y" || choice == "yes"
+}
+
+func runCommand(cwd, command string) error {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-NoProfile", "-Command", command)
+	} else {
+		cmd = exec.Command("sh", "-lc", command)
+	}
+	cmd.Dir = cwd
+	output, err := cmd.CombinedOutput()
+	if len(output) > 0 {
+		fmt.Println(strings.TrimSpace(string(output)))
+	}
+	return err
+}
+
+func buildWorkspaceContext() string {
 	cwd, err := os.Getwd()
 	if err != nil {
-		errorStyle.Printf("failed to get current folder: %v\n", err)
-		return 1
+		return "Current directory unavailable"
 	}
 
-	headerStyle.Println("Applied rename operations")
-	hadError := false
-	for _, op := range plan.Operations {
-		typ := strings.ToLower(strings.TrimSpace(op.Type))
-		if typ != "rename" && typ != "move" {
-			warnStyle.Printf("- skipped unknown op type: %s\n", op.Type)
-			continue
-		}
+	snapshot := collectWorkspaceSnapshot(cwd, 4, 300)
+	return fmt.Sprintf("Current directory: %s\nWorkspace files/folders:\n%s", cwd, snapshot)
+}
 
-		fromPath := strings.TrimSpace(op.From)
-		if fromPath == "" {
-			fromPath = strings.TrimSpace(op.Path)
-		}
-		toPath := strings.TrimSpace(op.To)
-		from, err := resolvePath(cwd, fromPath)
+func collectWorkspaceSnapshot(root string, maxDepth, maxEntries int) string {
+	entries := []string{}
+	count := 0
+
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			errorStyle.Printf("- invalid from path '%s': %v\n", fromPath, err)
-			hadError = true
-			continue
+			return nil
 		}
-		to, err := resolvePath(cwd, toPath)
+		if path == root {
+			return nil
+		}
+
+		base := strings.ToLower(d.Name())
+		if d.IsDir() {
+			switch base {
+			case ".git", "node_modules", ".idea", ".vscode":
+				return filepath.SkipDir
+			}
+		}
+
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			errorStyle.Printf("- invalid to path '%s': %v\n", toPath, err)
-			hadError = true
-			continue
+			return nil
+		}
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." {
+			return nil
 		}
 
-		if _, err := os.Stat(from); err != nil {
-			errorStyle.Printf("- source missing: %s\n", fromPath)
-			hadError = true
-			continue
+		depth := strings.Count(rel, "/") + 1
+		if depth > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
-		if _, err := os.Stat(to); err == nil {
-			errorStyle.Printf("- target exists: %s\n", toPath)
-			hadError = true
-			continue
+
+		if count >= maxEntries {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
-		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-			errorStyle.Printf("- create target dir for %s: %v\n", toPath, err)
-			hadError = true
-			continue
+
+		if d.IsDir() {
+			rel += "/"
 		}
-		if err := os.Rename(from, to); err != nil {
-			errorStyle.Printf("- rename %s -> %s failed: %v\n", fromPath, toPath, err)
-			hadError = true
-			continue
-		}
-		successStyle.Printf("- renamed: %s -> %s\n", fromPath, toPath)
+		entries = append(entries, rel)
+		count++
+		return nil
+	})
+
+	if len(entries) == 0 {
+		return "(workspace appears empty)"
 	}
 
-	if hadError {
-		return 1
+	if len(entries) >= maxEntries {
+		entries = append(entries, "... (truncated)")
 	}
-	return 0
+
+	return strings.Join(entries, "\n")
 }
 
 func resolvePath(cwd, value string) (string, error) {
@@ -573,4 +853,190 @@ func resolvePath(cwd, value string) (string, error) {
 		return "", fmt.Errorf("path escapes current directory")
 	}
 	return target, nil
+}
+
+type thinkingIndicator struct {
+	message string
+	done    chan struct{}
+	once    sync.Once
+}
+
+func startThinking(message string) *thinkingIndicator {
+	indicator := &thinkingIndicator{
+		message: message,
+		done:    make(chan struct{}),
+	}
+
+	go func() {
+		frames := []string{"|", "/", "-", "\\"}
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+
+		index := 0
+		for {
+			select {
+			case <-indicator.done:
+				return
+			case <-ticker.C:
+				fmt.Printf("\r%s", thinkingStyle.Sprintf("%s %s", frames[index%len(frames)], indicator.message))
+				index++
+			}
+		}
+	}()
+
+	return indicator
+}
+
+func (i *thinkingIndicator) stop(message string) {
+	i.once.Do(func() {
+		close(i.done)
+		fmt.Printf("\r%s\r", strings.Repeat(" ", 120))
+		if strings.TrimSpace(message) != "" {
+			infoStyle.Println(message)
+		}
+	})
+}
+
+type proposalTreeNode struct {
+	name        string
+	children    map[string]*proposalTreeNode
+	annotations []string
+}
+
+func newProposalTreeNode(name string) *proposalTreeNode {
+	return &proposalTreeNode{
+		name:     name,
+		children: map[string]*proposalTreeNode{},
+	}
+}
+
+func renderOperationLine(index int, op aiOperation) {
+	typ := strings.ToLower(strings.TrimSpace(op.Type))
+	prefix := fmt.Sprintf("%d.", index)
+
+	switch typ {
+	case "create_dir", "mkdir":
+		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+	case "create_file", "touch":
+		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+	case "update_file", "write_file":
+		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opUpdateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+	case "rename", "move":
+		fmt.Printf("%s %s %s %s %s\n", mutedStyle.Sprint(prefix), opRenameStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.From)), mutedStyle.Sprint("->"), pathStyle.Sprint(strings.TrimSpace(op.To)))
+	case "run_command":
+		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCommandStyle.Sprint("run_command"), commandStyle.Sprint(strings.TrimSpace(op.Command)))
+	default:
+		fmt.Printf("%s %s\n", mutedStyle.Sprint(prefix), warnStyle.Sprint(op.Type))
+	}
+}
+
+func renderProposedTree(plan aiPlan) {
+	root := newProposalTreeNode(".")
+
+	for _, op := range plan.Operations {
+		typ := strings.ToLower(strings.TrimSpace(op.Type))
+		switch typ {
+		case "create_dir", "mkdir":
+			addProposalPath(root, strings.TrimSpace(op.Path), "create_dir")
+		case "create_file", "touch":
+			addProposalPath(root, strings.TrimSpace(op.Path), "create_file")
+		case "update_file", "write_file":
+			addProposalPath(root, strings.TrimSpace(op.Path), "update_file")
+		case "rename", "move":
+			addProposalPath(root, strings.TrimSpace(op.From), "rename_from")
+			addProposalPath(root, strings.TrimSpace(op.To), "rename_to")
+		}
+	}
+
+	if len(root.children) == 0 {
+		warnStyle.Println("(no path-based changes to render)")
+		return
+	}
+
+	printProposalTree(root, "")
+}
+
+func addProposalPath(root *proposalTreeNode, path, annotation string) {
+	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if cleaned == "" || cleaned == "." {
+		return
+	}
+	parts := strings.Split(cleaned, "/")
+	node := root
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		child, ok := node.children[part]
+		if !ok {
+			child = newProposalTreeNode(part)
+			node.children[part] = child
+		}
+		node = child
+	}
+	if annotation != "" {
+		node.annotations = append(node.annotations, annotation)
+	}
+}
+
+func printProposalTree(node *proposalTreeNode, prefix string) {
+	names := make([]string, 0, len(node.children))
+	for name := range node.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for index, name := range names {
+		child := node.children[name]
+		isLast := index == len(names)-1
+		branch := "├── "
+		nextPrefix := prefix + "│   "
+		if isLast {
+			branch = "└── "
+			nextPrefix = prefix + "    "
+		}
+
+		fmt.Printf("%s%s%s", treeBranchStyle.Sprint(prefix), treeBranchStyle.Sprint(branch), pathStyle.Sprint(child.name))
+		if len(child.annotations) > 0 {
+			fmt.Printf(" %s", formatAnnotations(child.annotations))
+		}
+		fmt.Println()
+		printProposalTree(child, nextPrefix)
+	}
+}
+
+func formatAnnotations(annotations []string) string {
+	seen := map[string]struct{}{}
+	ordered := make([]string, 0, len(annotations))
+	for _, item := range annotations {
+		key := strings.TrimSpace(item)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		ordered = append(ordered, key)
+	}
+
+	parts := make([]string, 0, len(ordered))
+	for _, key := range ordered {
+		switch key {
+		case "create_dir":
+			parts = append(parts, opCreateStyle.Sprint("[create_dir]"))
+		case "create_file":
+			parts = append(parts, opCreateStyle.Sprint("[create_file]"))
+		case "update_file":
+			parts = append(parts, opUpdateStyle.Sprint("[update_file]"))
+		case "rename_from":
+			parts = append(parts, opRenameStyle.Sprint("[rename_from]"))
+		case "rename_to":
+			parts = append(parts, opRenameStyle.Sprint("[rename_to]"))
+		default:
+			parts = append(parts, mutedStyle.Sprint("["+key+"]"))
+		}
+	}
+	return strings.Join(parts, " ")
 }
