@@ -15,6 +15,7 @@ const ollamaBaseURL = "http://127.0.0.1:11434"
 var ollamaGenerateHTTPClient = &http.Client{Timeout: 20 * time.Second}
 var ollamaTagsHTTPClient = &http.Client{Timeout: 4 * time.Second}
 
+// OllamaClient represents a client connected to a local Ollama instance.
 type OllamaClient struct {
 	Model string
 }
@@ -45,18 +46,18 @@ func (c *OllamaClient) Prompt(ctx context.Context, prompt string) (string, error
 
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal ollama request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaBaseURL+"/api/generate", bytes.NewReader(buf))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := ollamaGenerateHTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("ollama request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -67,7 +68,7 @@ func (c *OllamaClient) Prompt(ctx context.Context, prompt string) (string, error
 		Response string `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode ollama response: %w", err)
 	}
 
 	return strings.TrimSpace(out.Response), nil
@@ -79,15 +80,16 @@ type ollamaTagsResponse struct {
 	} `json:"models"`
 }
 
+// DetectOllamaModels queries the local Ollama instance to discover available models.
 func DetectOllamaModels(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ollamaBaseURL+"/api/tags", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create ollama tags request: %w", err)
 	}
 
 	resp, err := ollamaTagsHTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ollama tags request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -96,7 +98,7 @@ func DetectOllamaModels(ctx context.Context) ([]string, error) {
 
 	var result ollamaTagsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode ollama tags response: %w", err)
 	}
 
 	models := make([]string, 0, len(result.Models))

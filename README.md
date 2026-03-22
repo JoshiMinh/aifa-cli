@@ -26,18 +26,30 @@ It can generate create/rename plans from prompts, execute those plans in your cu
 
 ### Windows (PowerShell)
 
-```powershell
-go mod tidy
-./build.ps1
+We provide handy PowerShell wrapper scripts to compile and run the CLI smoothly:
 
+```powershell
+# Install dependencies
+go mod tidy
+
+# Build the executable (creates aifiler.exe)
+.\build.ps1
+
+# Run the executable (or builds it if missing)
+.\run.ps1 help
 ```
 
 ### macOS/Linux
 
 ```bash
+# Install dependencies
 go mod tidy
+
+# Build the executable
 go build -o aifiler ./cmd/aifiler
-./aifiler --help
+
+# Run the CLI
+./aifiler help
 ```
 
 ---
@@ -118,20 +130,44 @@ aifiler "Create a folder structure for docs"
 
 ### Create files and folders
 
+**Windows:**
+
 ```powershell
-aifiler create "create src and docs folders with starter files"
+.\run.ps1 create "create src and docs folders with starter files"
+```
+
+**macOS/Linux:**
+
+```bash
+./aifiler create "create src and docs folders with starter files"
 ```
 
 ### Rename files and folders
 
+**Windows:**
+
 ```powershell
-aifiler rename "rename all markdown files to kebab-case"
+.\run.ps1 rename "rename all markdown files to kebab-case"
+```
+
+**macOS/Linux:**
+
+```bash
+./aifiler rename "rename all markdown files to kebab-case"
 ```
 
 ### Quick one-off prompt
 
+**Windows:**
+
 ```powershell
-aifiler "propose a clean monorepo structure for a Go CLI"
+.\run.ps1 "propose a clean monorepo structure for a Go CLI"
+```
+
+**macOS/Linux:**
+
+```bash
+./aifiler "propose a clean monorepo structure for a Go CLI"
 ```
 
 ---

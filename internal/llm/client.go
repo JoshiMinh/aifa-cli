@@ -8,17 +8,20 @@ import (
 	"aifiler/internal/config"
 )
 
+// Client defines the interface for AI operations.
 type Client interface {
 	SuggestName(ctx context.Context, originalName string, contextHint string) (string, error)
 	Prompt(ctx context.Context, prompt string) (string, error)
 }
 
+// ClientOptions specifies configuration required to instantiate a new Client.
 type ClientOptions struct {
 	Provider string
 	Model    string
 	Config   config.Config
 }
 
+// NewClient creates and returns the appropriate Client implementation based on the provider.
 func NewClient(opts ClientOptions) Client {
 	provider := strings.ToLower(strings.TrimSpace(opts.Provider))
 	switch provider {
@@ -35,6 +38,7 @@ func NewClient(opts ClientOptions) Client {
 	}
 }
 
+// DeterministicClient provides fallback responses when no real AI provider is configured.
 type DeterministicClient struct{}
 
 func (c *DeterministicClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {

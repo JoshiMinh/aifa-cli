@@ -17,6 +17,7 @@ const vercelGatewayBaseURL = "https://ai-gateway.vercel.sh/v1"
 var vercelPromptHTTPClient = &http.Client{Timeout: 30 * time.Second}
 var vercelModelsHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
+// VercelGatewayClient represents a client connected to Vercel's AI Gateway.
 type VercelGatewayClient struct {
 	Model   string
 	APIKey  string
@@ -64,19 +65,19 @@ func (c *VercelGatewayClient) Prompt(ctx context.Context, prompt string) (string
 
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal vercel request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(buf))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create vercel request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := vercelPromptHTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("vercel gateway request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -93,7 +94,7 @@ func (c *VercelGatewayClient) Prompt(ctx context.Context, prompt string) (string
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode vercel response: %w", err)
 	}
 
 	if len(out.Choices) == 0 {
@@ -112,6 +113,7 @@ func (c *VercelGatewayClient) Prompt(ctx context.Context, prompt string) (string
 	return content, nil
 }
 
+// DetectVercelModels queries the Vercel AI Gateway to discover available models.
 func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]string, error) {
 	resolvedAPIKey, resolvedBaseURL, err := resolveVercelGatewayConfig(apiKey, baseURL)
 	if err != nil {
@@ -120,13 +122,13 @@ func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]s
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolvedBaseURL+"/models", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create vercel models request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+resolvedAPIKey)
 
 	resp, err := vercelModelsHTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vercel gateway models request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -137,7 +139,7 @@ func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]s
 
 	var out vercelModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode vercel models response: %w", err)
 	}
 
 	models := make([]string, 0, len(out.Data))
