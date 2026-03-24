@@ -9,13 +9,13 @@ import (
 func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
 	currentPrompt := strings.TrimSpace(strings.Join(args, " "))
 	if currentPrompt == "" {
-		errorStyle.Println("Usage: aifiler rename \"<prompt>\"")
+		errorStyle.Printf("%s Usage: aifiler rename \"<prompt>\"\n", errorIcon)
 		return 2
 	}
 
 	client, _, _, err := a.newClient("", "")
 	if err != nil {
-		errorStyle.Printf("failed to initialize model client: %v\n", err)
+		errorStyle.Printf("%s failed to initialize model client: %v\n", errorIcon, err)
 		return 1
 	}
 
@@ -25,13 +25,13 @@ func (a *App) runRenameFromPrompt(ctx context.Context, args []string) int {
 		response, err := client.Prompt(ctx, buildRenamePrompt(currentPrompt, workspaceContext))
 		thinking.stop("AI response ready")
 		if err != nil {
-			errorStyle.Printf("rename failed: %v\n", err)
+			errorStyle.Printf("%s rename failed: %v\n", errorIcon, err)
 			return 1
 		}
 
 		plan, err := parsePlan(response)
 		if err != nil {
-			warnStyle.Println("Could not parse structured rename plan; model response:")
+			warnStyle.Printf("%s Could not parse structured rename plan; model response:\n", warnIcon)
 			fmt.Println(response)
 			return 0
 		}

@@ -50,7 +50,7 @@ func InitDefault() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to determine config path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil {
@@ -61,7 +61,7 @@ func InitDefault() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize default config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write config file to %s: %w", path, err)
 	}
 	return path, nil
@@ -74,7 +74,7 @@ func Save(cfg Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to determine config path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %w", err)
 	}
 	if cfg.APIKeys == nil {
@@ -84,7 +84,7 @@ func Save(cfg Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write config file to %s: %w", path, err)
 	}
 	return path, nil

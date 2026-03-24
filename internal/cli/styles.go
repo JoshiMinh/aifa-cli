@@ -17,4 +17,12 @@ var (
 	opRenameStyle   = color.New(color.FgHiBlue)
 	opCommandStyle  = color.New(color.FgHiMagenta)
 	treeBranchStyle = color.New(color.FgHiBlack)
+
+	infoIcon    = infoStyle.Sprint("💡")
+	successIcon = successStyle.Sprint("✅")
+	errorIcon   = errorStyle.Sprint("❌")
+	warnIcon    = warnStyle.Sprint("⚠️")
+	dirIcon     = color.New(color.FgHiCyan).Sprint("📁")
+	fileIcon    = mutedStyle.Sprint("📄")
+	sparkleIcon = successStyle.Sprint("✨")
 )

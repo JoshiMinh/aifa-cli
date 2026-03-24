@@ -8,7 +8,6 @@ import (
 
 	"aifiler/internal/config"
 	"aifiler/internal/llm"
-	"aifiler/internal/models"
 )
 
 // App represents the main CLI application.
@@ -35,6 +34,14 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runDoctor()
 	case "list":
 		return a.runList(ctx)
+	case "history":
+		return a.runHistory()
+	case "undo":
+		return a.runUndo()
+	case "search":
+		return a.runSearch(args[1:])
+	case "ls":
+		return a.runLs(args[1:])
 	case "set":
 		return a.runSet(args[1:])
 	case "default":
@@ -51,8 +58,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 }
 
 func (a *App) printHelp() {
-	headerStyle.Println("aifiler — AI File Assistant")
-	fmt.Println("AI-powered, local-first file and folder assistant.")
+	headerStyle.Println("aifiler — Vercel AI-Powered File Assistant")
+	fmt.Println("Fast, local-first file and folder assistant optimized for Vercel AI Gateway.")
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  aifiler <command> [options]")
@@ -61,38 +68,31 @@ func (a *App) printHelp() {
 	fmt.Println("Commands:")
 	fmt.Println("  create \"<prompt>\"         Create/update files/folders from AI suggestions")
 	fmt.Println("  rename \"<prompt>\"         Rename files/folders from AI suggestions")
-	fmt.Println("  list                      List providers, models, and API key status")
-	fmt.Println("  set \"provider\" \"api key\"  Save API key for provider")
+	fmt.Println("  search -name \"foo\"        Search files by name, ext, or content")
+	fmt.Println("  history                   View recent AI operations")
+	fmt.Println("  undo                      Revert the last applied AI plan")
+	fmt.Println("  ls [-r, -ra]              List workspace files with columns")
+	fmt.Println("  list                      Interactive model selection (Vercel recommended)")
+	fmt.Println("  set \"provider\"            Save API key for provider (securely prompted)")
 	fmt.Println("  default \"model\"           Set default model")
-	fmt.Println("  reset \"provider\" \"api key\" Remove provider API key")
+	fmt.Println("  reset \"provider\"          Remove provider API key")
 	fmt.Println("  doctor                    Show runtime diagnostics")
 	fmt.Println("  help                      Show this help")
 	fmt.Println()
-	fmt.Println("Behavior:")
-	fmt.Println("  - Prompts automatically include current workspace structure")
-	fmt.Println("  - Any file/folder/command action requires approval before execution")
+	fmt.Println(sparkleIcon + " Vercel AI Gateway Quick Setup (Highly Recommended):")
+	fmt.Println("  1. aifiler set \"vercel\"")
+	fmt.Println("  2. aifiler default \"openai/gpt-4o-mini\"")
+	fmt.Println("  3. aifiler list")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  aifiler create \"create src and README\"")
-	fmt.Println("  aifiler rename \"rename docs to documentation folder\"")
-	fmt.Println("  aifiler doctor")
 	fmt.Println("  aifiler \"summarize how to organize this repo\"")
-	fmt.Println()
-	fmt.Println("Vercel quick setup:")
-	fmt.Println("  aifiler set \"vercel\" \"<ai-gateway-api-key>\"")
-	fmt.Println("  aifiler default \"openai/gpt-4o-mini\"")
-	fmt.Println("  aifiler list")
 }
 
 func (a *App) newClient(providerOverride, modelOverride string) (llm.Client, string, string, error) {
 	cfg, err := config.LoadOrDefault()
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to load config: %w", err)
-	}
-
-	registry, err := models.LoadDefaultRegistry()
-	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to load registry: %w", err)
+		return nil, "", "", fmt.Errorf("%s failed to load config: %w\n  %s Tip: Check permissions or run 'aifiler doctor'", errorIcon, err, infoIcon)
 	}
 
 	provider := strings.TrimSpace(providerOverride)
@@ -100,15 +100,15 @@ func (a *App) newClient(providerOverride, modelOverride string) (llm.Client, str
 		provider = strings.TrimSpace(cfg.DefaultProvider)
 	}
 	if provider == "" {
-		provider = "none"
+		provider = "vercel"
 	}
 
 	model := strings.TrimSpace(modelOverride)
 	if model == "" {
 		model = strings.TrimSpace(cfg.DefaultModel)
 	}
-	if model == "" {
-		model = registry.DefaultModelForProvider(provider)
+	if model == "" && provider == "vercel" {
+		model = "openai/gpt-4o-mini"
 	}
 
 	client := llm.NewClient(llm.ClientOptions{

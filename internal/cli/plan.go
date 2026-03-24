@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 type aiPlan struct {
@@ -106,128 +108,116 @@ func applyPlanWithApproval(plan aiPlan) planApplyResult {
 	}
 
 	headerStyle.Println("Applying operations")
-	hadError := false
+	backupDir, _ := saveStateBeforePlan(cwd, plan)
+
+	successCount := 0
+	errorCount := 0
+	startTime := time.Now()
+
+	bar := progressbar.Default(int64(len(plan.Operations)), "Applying...")
+
 	for _, op := range plan.Operations {
 		typ := strings.ToLower(strings.TrimSpace(op.Type))
+		bar.Add(1)
 
 		switch typ {
 		case "create_dir", "mkdir":
 			target, err := resolvePath(cwd, op.Path)
 			if err != nil {
-				errorStyle.Printf("- %s: %v\n", op.Path, err)
-				hadError = true
+				errorCount++
 				continue
 			}
 			if err := os.MkdirAll(target, 0o755); err != nil {
-				errorStyle.Printf("- create_dir %s: %v\n", op.Path, err)
-				hadError = true
+				errorCount++
 				continue
 			}
-			successStyle.Printf("- created dir: %s\n", op.Path)
+			successCount++
 		case "create_file", "touch":
 			target, err := resolvePath(cwd, op.Path)
 			if err != nil {
-				errorStyle.Printf("- %s: %v\n", op.Path, err)
-				hadError = true
+				errorCount++
 				continue
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				errorStyle.Printf("- prepare dir for %s: %v\n", op.Path, err)
-				hadError = true
-				continue
-			}
-			if _, err := os.Stat(target); err == nil {
-				warnStyle.Printf("- skipped existing file: %s\n", op.Path)
+				errorCount++
 				continue
 			}
 			if err := os.WriteFile(target, []byte(op.Content), 0o644); err != nil {
-				errorStyle.Printf("- create_file %s: %v\n", op.Path, err)
-				hadError = true
+				errorCount++
 				continue
 			}
-			successStyle.Printf("- created file: %s\n", op.Path)
+			successCount++
 		case "update_file", "write_file":
 			target, err := resolvePath(cwd, op.Path)
-			if err != nil {
-				errorStyle.Printf("- %s: %v\n", op.Path, err)
-				hadError = true
-				continue
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				errorStyle.Printf("- prepare dir for %s: %v\n", op.Path, err)
-				hadError = true
+			if err != nil || os.MkdirAll(filepath.Dir(target), 0o755) != nil {
+				errorCount++
 				continue
 			}
 			if err := os.WriteFile(target, []byte(op.Content), 0o644); err != nil {
-				errorStyle.Printf("- update_file %s: %v\n", op.Path, err)
-				hadError = true
+				errorCount++
 				continue
 			}
-			successStyle.Printf("- updated file: %s\n", op.Path)
+			successCount++
 		case "rename", "move":
 			fromPath := strings.TrimSpace(op.From)
 			if fromPath == "" {
 				fromPath = strings.TrimSpace(op.Path)
 			}
 			toPath := strings.TrimSpace(op.To)
-			from, err := resolvePath(cwd, fromPath)
-			if err != nil {
-				errorStyle.Printf("- invalid from path '%s': %v\n", fromPath, err)
-				hadError = true
-				continue
-			}
-			to, err := resolvePath(cwd, toPath)
-			if err != nil {
-				errorStyle.Printf("- invalid to path '%s': %v\n", toPath, err)
-				hadError = true
+			from, err1 := resolvePath(cwd, fromPath)
+			to, err2 := resolvePath(cwd, toPath)
+			if err1 != nil || err2 != nil {
+				errorCount++
 				continue
 			}
 
 			if _, err := os.Stat(from); err != nil {
-				errorStyle.Printf("- source missing: %s\n", fromPath)
-				hadError = true
+				errorCount++
 				continue
 			}
-			if _, err := os.Stat(to); err == nil {
-				errorStyle.Printf("- target exists: %s\n", toPath)
-				hadError = true
-				continue
-			}
-			if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-				errorStyle.Printf("- create target dir for %s: %v\n", toPath, err)
-				hadError = true
+			if os.MkdirAll(filepath.Dir(to), 0o755) != nil {
+				errorCount++
 				continue
 			}
 			if err := os.Rename(from, to); err != nil {
-				errorStyle.Printf("- rename %s -> %s failed: %v\n", fromPath, toPath, err)
-				hadError = true
+				errorCount++
 				continue
 			}
-			successStyle.Printf("- renamed: %s -> %s\n", fromPath, toPath)
+			successCount++
 		case "run_command":
 			command := strings.TrimSpace(op.Command)
 			if command == "" {
-				warnStyle.Println("- skipped empty command")
 				continue
 			}
-			if !confirmApproval(fmt.Sprintf("Run command '%s'", command)) {
-				warnStyle.Printf("- skipped command: %s\n", command)
+			// Briefly clear bar to prompt
+			bar.Clear()
+			if !confirmApproval(fmt.Sprintf("%s Run command '%s'", infoIcon, command)) {
 				continue
 			}
 			if err := runCommand(cwd, command); err != nil {
-				errorStyle.Printf("- command failed: %s (%v)\n", command, err)
-				hadError = true
+				errorCount++
 				continue
 			}
-			successStyle.Printf("- command succeeded: %s\n", command)
-		default:
-			warnStyle.Printf("- skipped unknown op type: %s\n", op.Type)
+			successCount++
 		}
 	}
 
-	if hadError {
+	bar.Finish()
+	fmt.Println()
+
+	elapsed := time.Since(startTime).Round(time.Millisecond * 10)
+	
+	appendHistory(HistoryEntry{
+		Timestamp: startTime,
+		Plan:      plan,
+		BackupDir: backupDir,
+	})
+
+	if errorCount > 0 {
+		errorStyle.Printf("%s Done in %s: %d operations completed, %d failed.\n", errorIcon, elapsed, successCount, errorCount)
 		return planApplyResult{ExitCode: 1}
 	}
+	successStyle.Printf("%s Done in %s: %d operations completed, %d failed.\n", sparkleIcon, elapsed, successCount, errorCount)
 	return planApplyResult{ExitCode: 0}
 }
 
@@ -435,17 +425,17 @@ func renderOperationLine(index int, op aiOperation) {
 
 	switch typ {
 	case "create_dir", "mkdir":
-		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+		fmt.Printf("%s %s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), dirIcon, pathStyle.Sprint(strings.TrimSpace(op.Path)))
 	case "create_file", "touch":
-		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+		fmt.Printf("%s %s %s %s\n", mutedStyle.Sprint(prefix), opCreateStyle.Sprint(typ), fileIcon, pathStyle.Sprint(strings.TrimSpace(op.Path)))
 	case "update_file", "write_file":
-		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opUpdateStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.Path)))
+		fmt.Printf("%s %s %s %s\n", mutedStyle.Sprint(prefix), opUpdateStyle.Sprint(typ), fileIcon, pathStyle.Sprint(strings.TrimSpace(op.Path)))
 	case "rename", "move":
 		fmt.Printf("%s %s %s %s %s\n", mutedStyle.Sprint(prefix), opRenameStyle.Sprint(typ), pathStyle.Sprint(strings.TrimSpace(op.From)), mutedStyle.Sprint("->"), pathStyle.Sprint(strings.TrimSpace(op.To)))
 	case "run_command":
-		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), opCommandStyle.Sprint("run_command"), commandStyle.Sprint(strings.TrimSpace(op.Command)))
+		fmt.Printf("%s %s %s %s\n", mutedStyle.Sprint(prefix), opCommandStyle.Sprint("run_command"), infoIcon, commandStyle.Sprint(strings.TrimSpace(op.Command)))
 	default:
-		fmt.Printf("%s %s\n", mutedStyle.Sprint(prefix), warnStyle.Sprint(op.Type))
+		fmt.Printf("%s %s %s\n", mutedStyle.Sprint(prefix), warnIcon, warnStyle.Sprint(op.Type))
 	}
 }
 
