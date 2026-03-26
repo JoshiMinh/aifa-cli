@@ -20,9 +20,22 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 	}
 
 	for {
-		workspaceContext := buildWorkspaceContext()
+		workspaceContext := buildWorkspaceContext(a.maxDepth, a.showAll)
 		thinking := startThinking("AI is thinking")
-		response, err := client.Prompt(ctx, buildDynamicPrompt(currentPrompt, workspaceContext))
+
+		// Handle / prefixes for intent forcing
+		finalPrompt := currentPrompt
+		if strings.HasPrefix(currentPrompt, "/") {
+			parts := strings.SplitN(currentPrompt[1:], " ", 2)
+			intent := parts[0]
+			rest := ""
+			if len(parts) > 1 {
+				rest = parts[1]
+			}
+			finalPrompt = fmt.Sprintf("FORCE OPERATION TYPE: %s\nUSER REQUEST: %s", strings.ToUpper(intent), rest)
+		}
+
+		response, err := client.Prompt(ctx, buildDynamicPrompt(finalPrompt, workspaceContext))
 		thinking.stop("AI response ready")
 		if err != nil {
 			errorStyle.Printf("model request failed: %v\n", err)
@@ -65,7 +78,7 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 func buildDynamicPrompt(userPrompt, workspaceContext string) string {
 	return fmt.Sprintf(`You are operating in a local workspace.
 If the user request requires filesystem or command actions, return STRICT JSON only in this format:
-{"operations":[{"type":"create_dir|create_file|update_file|rename|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
+{"summary":"brief explanation of plan","operations":[{"type":"create_dir|create_file|update_file|rename|delete|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
 If the request is informational only, return a normal text response.
 Rules for action plans:
 - infer file/folder targets from workspace context; do not ask user to describe structure
@@ -80,7 +93,7 @@ User request: %s`, workspaceContext, userPrompt)
 
 func buildPlanCoercionPrompt(userPrompt, modelResponse string) string {
 	return fmt.Sprintf(`Convert the following into STRICT JSON only in this exact format:
-{"operations":[{"type":"create_dir|create_file|update_file|rename|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
+{"summary":"brief explanation of plan","operations":[{"type":"create_dir|create_file|update_file|rename|delete|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
 Rules:
 - no explanation text
 - no markdown fences

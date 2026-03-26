@@ -1,5 +1,6 @@
 # Build artifacts
 *.exe
+*.exe~
 tmp.exe
 aifiler
 dist/
@@ -11,15 +12,21 @@ bin/
 history.json
 backups/
 
-# User-specific config mocks (if any)
-~/.aifiler/
+# User-specific config mocks
+.aifiler/
 
 # Go specific
 vendor/
 *.test
 *.prof
+go.work
 
 # IDEs
 .vscode/
 .idea/
 .DS_Store
+*.swp
+
+# OS specific
+Thumbs.db
+desktop.ini
