@@ -1,14 +1,65 @@
 @echo off
 setlocal
+set BINARY=aifiler.exe
 
-if not exist "%~dp0aifiler.exe" (
-    echo Binary not found. Triggering build...
-    call "%~dp0build.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [E] Build failed, cannot run.
-        exit /b %ERRORLEVEL%
-    )
-)
+if not "%~1"=="" goto :run_with_args
 
-"%~dp0aifiler.exe" %*
+:menu
+cls
+echo ==========================================
+echo   Aifiler CLI - Quick Actions
+echo ==========================================
+echo  1. Run aifiler (Standard)
+echo  2. Build / Rebuild
+echo  3. Run Diagnostics (Doctor)
+echo  4. Exit
+echo ==========================================
+set /p choice="Choose an option (1-4): "
+
+if "%choice%"=="1" goto :run_default
+if "%choice%"=="2" goto :build
+if "%choice%"=="3" goto :doctor
+if "%choice%"=="4" goto :exit
+goto :menu
+
+:run_default
+if not exist "%BINARY%" call :build
+"%BINARY%"
+pause
+goto :menu
+
+:run_with_args
+if not exist "%BINARY%" call :build
+"%BINARY%" %*
 exit /b %ERRORLEVEL%
+
+:build
+powershell -Command "Write-Host 'Tidying Go dependencies...' -ForegroundColor Cyan"
+go mod tidy
+if %ERRORLEVEL% neq 0 (
+    powershell -Command "Write-Host 'X go mod tidy failed' -ForegroundColor Red"
+    pause
+    goto :menu
+)
+powershell -Command "Write-Host 'Building aifiler...' -ForegroundColor Cyan"
+go build -o %BINARY% ./cmd/aifiler
+if %ERRORLEVEL% neq 0 (
+    powershell -Command "Write-Host 'Build failed' -ForegroundColor Red"
+    pause
+    goto :menu
+)
+powershell -Command "Write-Host 'Successfully built %BINARY%' -ForegroundColor Green"
+if "%~1"=="" (
+    pause
+    goto :menu
+)
+goto :eof
+
+:doctor
+if not exist "%BINARY%" call :build
+"%BINARY%" doctor
+pause
+goto :menu
+
+:exit
+exit /b 0

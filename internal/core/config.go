@@ -1,10 +1,11 @@
-package config
+package core
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,8 +17,26 @@ type Config struct {
 	APIKeys         map[string]string `yaml:"api_keys"`
 }
 
-// LoadOrDefault attempts to load the configuration from the config file.
-// If it fails or the file doesn't exist, it returns a default configuration.
+const configFileName = "config.yaml"
+
+// configPath returns the absolute path to config.yaml in the current working directory.
+func configPath() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine working directory: %w", err)
+	}
+	return filepath.Join(cwd, configFileName), nil
+}
+
+// defaultConfigComment is prepended to new config files so users can edit keys directly.
+const defaultConfigComment = `# aifiler configuration
+# Edit API keys here directly, or run: aifiler set "<provider>"
+# Supported providers: openai, anthropic, gemini, ollama, vercel
+#
+`
+
+// LoadOrDefault attempts to load the configuration from config.yaml in the cwd.
+// If the file doesn't exist, it returns a default configuration without error.
 func LoadOrDefault() (Config, error) {
 	path, err := configPath()
 	if err != nil {
@@ -42,52 +61,46 @@ func LoadOrDefault() (Config, error) {
 	return cfg, nil
 }
 
-// InitDefault creates a default configuration file if one does not already exist.
-// Returns the path to the configuration file or an error if initialization fails.
+// InitDefault creates a default config.yaml in the cwd if one does not already exist.
 func InitDefault() (string, error) {
-	cfg := Default()
 	path, err := configPath()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine config path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("failed to create config directory: %w", err)
-	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize default config: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write config file to %s: %w", path, err)
-	}
-	return path, nil
+	return path, writeConfig(Default(), path)
 }
 
-// Save persists the provided configuration to the designated config file path.
-// Returns the file path where the configuration was saved.
+// Save persists the provided configuration back to config.yaml in the cwd.
 func Save(cfg Config) (string, error) {
 	path, err := configPath()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine config path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("failed to create config directory: %w", err)
-	}
+	return path, writeConfig(cfg, path)
+}
+
+// ConfigPath returns the resolved path to the config file (for display purposes).
+func ConfigPath() string {
+	p, _ := configPath()
+	return p
+}
+
+func writeConfig(cfg Config, path string) error {
 	if cfg.APIKeys == nil {
 		cfg.APIKeys = map[string]string{}
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
-		return "", fmt.Errorf("failed to serialize config: %w", err)
+		return fmt.Errorf("failed to serialize config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write config file to %s: %w", path, err)
+	content := defaultConfigComment + strings.TrimSpace(string(data)) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("failed to write config file to %s: %w", path, err)
 	}
-	return path, nil
+	return nil
 }
 
 // Default returns a base Config instance with standard application defaults.
@@ -98,18 +111,9 @@ func Default() Config {
 		APIKeys: map[string]string{
 			"openai":    "",
 			"anthropic": "",
-			"google":    "",
+			"gemini":    "",
 			"vercel":    "",
+			"ollama":    "",
 		},
 	}
-}
-
-// configPath returns the absolute path to the configuration file, typically
-// stored within the current user's configuration directory.
-func configPath() (string, error) {
-	baseDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to identify user config directory: %w", err)
-	}
-	return filepath.Join(baseDir, "aifiler", "config.yaml"), nil
 }

@@ -1,12 +1,14 @@
-package cli
+package cmds
 
 import (
 	"fmt"
 	"os"
+
+	"aifiler/internal/core"
 )
 
 func (a *App) runDoctor() int {
-	headerStyle.Println("aifiler diagnostics")
+	core.HeaderStyle.Println("aifiler diagnostics")
 
 	if cwd, err := os.Getwd(); err == nil {
 		fmt.Printf("cwd: %s\n", cwd)

@@ -1,4 +1,4 @@
-package llm
+package api
 
 import (
 	"bytes"
@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"aifiler/internal/core"
 )
 
 const vercelGatewayBaseURL = "https://ai-gateway.vercel.sh/v1"
@@ -17,7 +18,7 @@ const vercelGatewayBaseURL = "https://ai-gateway.vercel.sh/v1"
 var vercelPromptHTTPClient = &http.Client{Timeout: 30 * time.Second}
 var vercelModelsHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
-// VercelGatewayClient represents a client connected to Vercel's AI Gateway.
+// VercelGatewayClient routes requests through Vercel's AI Gateway.
 type VercelGatewayClient struct {
 	Model   string
 	APIKey  string
@@ -31,11 +32,11 @@ type vercelModelsResponse struct {
 }
 
 func (c *VercelGatewayClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	response, err := c.Prompt(ctx, buildFilenameSuggestionPrompt(originalName, contextHint))
+	response, err := c.Prompt(ctx, core.BuildFilenameSuggestionPrompt(originalName, contextHint))
 	if err != nil {
 		return "", err
 	}
-	s := normalizeSuggestion(response)
+	s := core.NormalizeSuggestion(response)
 	if s == "" {
 		return "", fmt.Errorf("vercel gateway returned empty suggestion")
 	}
@@ -56,10 +57,7 @@ func (c *VercelGatewayClient) Prompt(ctx context.Context, prompt string) (string
 	body := map[string]any{
 		"model": model,
 		"messages": []map[string]string{
-			{
-				"role":    "user",
-				"content": prompt,
-			},
+			{"role": "user", "content": prompt},
 		},
 	}
 
@@ -109,13 +107,12 @@ func (c *VercelGatewayClient) Prompt(ctx context.Context, prompt string) (string
 	if content == "" {
 		return "", fmt.Errorf("vercel gateway returned empty content")
 	}
-
 	return content, nil
 }
 
-// DetectVercelModels queries the Vercel AI Gateway to discover available models.
-func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]string, error) {
-	resolvedAPIKey, resolvedBaseURL, err := resolveVercelGatewayConfig(apiKey, baseURL)
+// ListModels queries the Vercel AI Gateway to discover available models.
+func (c *VercelGatewayClient) ListModels(ctx context.Context) ([]string, error) {
+	resolvedAPIKey, resolvedBaseURL, err := resolveVercelGatewayConfig(c.APIKey, c.BaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -142,13 +139,15 @@ func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]s
 		return nil, fmt.Errorf("failed to decode vercel models response: %w", err)
 	}
 
-	models := make([]string, 0, len(out.Data))
+	var models []string
 	for _, item := range out.Data {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			continue
 		}
-		models = append(models, id)
+		if strings.HasPrefix(id, "openai/") || strings.HasPrefix(id, "anthropic/") || strings.HasPrefix(id, "google/") {
+			models = append(models, id)
+		}
 	}
 	return models, nil
 }
@@ -156,16 +155,10 @@ func DetectVercelModels(ctx context.Context, apiKey string, baseURL string) ([]s
 func resolveVercelGatewayConfig(apiKey string, baseURL string) (string, string, error) {
 	resolvedAPIKey := strings.TrimSpace(apiKey)
 	if resolvedAPIKey == "" {
-		resolvedAPIKey = strings.TrimSpace(os.Getenv("AI_GATEWAY_API_KEY"))
-	}
-	if resolvedAPIKey == "" {
-		return "", "", fmt.Errorf("missing API key for provider 'vercel' (use: aifiler set \"vercel\" \"<api-key>\" or set AI_GATEWAY_API_KEY)")
+		return "", "", fmt.Errorf("missing API key for provider 'vercel' (use: aifiler set \"vercel\")")
 	}
 
 	resolvedBaseURL := strings.TrimSpace(baseURL)
-	if resolvedBaseURL == "" {
-		resolvedBaseURL = strings.TrimSpace(os.Getenv("AI_GATEWAY_BASE_URL"))
-	}
 	if resolvedBaseURL == "" {
 		resolvedBaseURL = vercelGatewayBaseURL
 	}

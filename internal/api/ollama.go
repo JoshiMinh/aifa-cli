@@ -1,4 +1,4 @@
-package llm
+package api
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"aifiler/internal/core"
 )
 
 const ollamaBaseURL = "http://127.0.0.1:11434"
@@ -15,17 +17,17 @@ const ollamaBaseURL = "http://127.0.0.1:11434"
 var ollamaGenerateHTTPClient = &http.Client{Timeout: 20 * time.Second}
 var ollamaTagsHTTPClient = &http.Client{Timeout: 4 * time.Second}
 
-// OllamaClient represents a client connected to a local Ollama instance.
+// OllamaClient connects to a local Ollama instance.
 type OllamaClient struct {
 	Model string
 }
 
 func (c *OllamaClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	response, err := c.Prompt(ctx, buildFilenameSuggestionPrompt(originalName, contextHint))
+	response, err := c.Prompt(ctx, core.BuildFilenameSuggestionPrompt(originalName, contextHint))
 	if err != nil {
 		return "", err
 	}
-	s := normalizeSuggestion(response)
+	s := core.NormalizeSuggestion(response)
 	if s == "" {
 		return "", fmt.Errorf("ollama returned empty suggestion")
 	}
@@ -80,8 +82,7 @@ type ollamaTagsResponse struct {
 	} `json:"models"`
 }
 
-// DetectOllamaModels queries the local Ollama instance to discover available models.
-func DetectOllamaModels(ctx context.Context) ([]string, error) {
+func (c *OllamaClient) ListModels(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ollamaBaseURL+"/api/tags", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ollama tags request: %w", err)
@@ -103,10 +104,9 @@ func DetectOllamaModels(ctx context.Context) ([]string, error) {
 
 	models := make([]string, 0, len(result.Models))
 	for _, item := range result.Models {
-		if strings.TrimSpace(item.Name) == "" {
-			continue
+		if strings.TrimSpace(item.Name) != "" {
+			models = append(models, item.Name)
 		}
-		models = append(models, item.Name)
 	}
 	return models, nil
 }
