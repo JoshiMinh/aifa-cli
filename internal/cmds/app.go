@@ -4,6 +4,7 @@ package cmds
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"aifiler/internal/api"
@@ -33,11 +34,16 @@ func (a *App) Run(ctx context.Context, args []string) int {
 
 	var remainingArgs []string
 	for _, arg := range args {
+		if strings.HasPrefix(arg, "-d") {
+			if len(arg) == 2 {
+				a.maxDepth = 2 // One level of subfolders
+			} else if n, err := strconv.Atoi(arg[2:]); err == nil && n >= 0 {
+				a.maxDepth = n + 1
+			}
+			continue
+		}
+
 		switch arg {
-		case "-r":
-			a.maxDepth = 2
-		case "-ra":
-			a.maxDepth = 0
 		case "-all":
 			a.showAll = true
 		default:
@@ -55,8 +61,6 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "help", "-h", "--help":
 		a.printHelp()
 		return 0
-	case "doctor":
-		return a.runDoctor()
 	case "list":
 		return a.runList(ctx)
 	case "provider":
@@ -91,8 +95,8 @@ func (a *App) printHelp() {
 	fmt.Println()
 
 	core.HeaderStyle.Println("  OPTIONS")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-r"), "Scan root and immediate subfolders (one-level)")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-ra"), "Fully recursive scan (all levels)")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-d"), "Scan root and immediate subfolders (one-level)")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-d<n>"), "Scan up to <n> levels of subfolders (e.g. -d2, -d3)")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-all"), "Include all file entries in AI context (no truncation)")
 	fmt.Println()
 
@@ -111,14 +115,13 @@ func (a *App) printHelp() {
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("provider"), "Switch provider, set API keys, browse models")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("history"), "View recent AI operations")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("undo"), "Revert the last applied AI plan")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("doctor"), "Show runtime diagnostics")
 	fmt.Printf("    %s\n", core.MutedStyle.Sprintf("Config file: %s", core.ConfigPath()))
 	fmt.Println()
 
 	core.HeaderStyle.Println("  EXAMPLES")
 	fmt.Println("    " + core.MutedStyle.Sprint("aifiler \"create a clean src layout with README\""))
-	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -r \"rename all .js files to .ts\""))
-	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -ra -all \"search for sensitive hardcoded keys\""))
+	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -d \"rename all .js files to .ts\""))
+	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -d3 -all \"search for sensitive hardcoded keys\""))
 	fmt.Println("    " + core.MutedStyle.Sprint("aifiler \"/delete temp log files\""))
 	fmt.Println()
 }
@@ -126,7 +129,7 @@ func (a *App) printHelp() {
 func (a *App) newClient(providerOverride, modelOverride string) (core.Client, string, string, error) {
 	cfg, err := core.LoadOrDefault()
 	if err != nil {
-		return nil, "", "", fmt.Errorf("%s failed to load config: %w\n  %s Tip: Check permissions or run 'aifiler doctor'", core.ErrorIcon, err, core.InfoIcon)
+		return nil, "", "", fmt.Errorf("%s failed to load config: %w\n  %s Tip: Check permissions or run 'aifiler provider'", core.ErrorIcon, err, core.InfoIcon)
 	}
 
 	provider := strings.TrimSpace(providerOverride)

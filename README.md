@@ -32,7 +32,7 @@ AI-powered local Filesystem Assistant. Instead of manual sorting and naming, jus
 ### Windows
 
 ```batch
-:: Start the interactive menu (Build/Run/Doctor)
+:: Start the interactive menu (Build/Run)
 run.bat
 
 :: Or run directly with arguments
@@ -58,10 +58,9 @@ go build -o aifiler ./cmd/aifiler
 | `aifiler -r` | Extend context scan to immediate subfolders (one-level) |
 | `aifiler -ra` | Fully recursive scan for deep project context |
 | `aifiler provider` | Configure provider: switch active, set API keys, clear keys |
-| `aifiler list` | List available models for the active provider |
+| `aifiler list` | List and set the default model for the active provider |
 | `aifiler history` | View the log of recent operations |
 | `aifiler undo` | Revert the last applied plan |
-| `aifiler doctor` | Show runtime diagnostics |
 
 ---
 

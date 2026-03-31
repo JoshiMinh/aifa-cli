@@ -12,6 +12,40 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+var selectTemplates = &promptui.SelectTemplates{
+	FuncMap: promptui.FuncMap,
+	Label:   "{{ . }}",
+	Active:  "\u27a4 {{ . | cyan }}", // fallback for simple strings
+	Inactive: "  {{ . }}",
+	Selected: "\u2714 {{ . | green }}",
+	Details:  "",
+	Help:     "",
+}
+
+// providerItem is used to pass structured data to the select templates.
+type providerItem struct {
+	Name     string
+	Key      string
+	IsActive bool
+}
+
+// providerSelectTemplates defines how provider items are rendered.
+var providerSelectTemplates = &promptui.SelectTemplates{
+	FuncMap: promptui.FuncMap,
+	Label:   "{{ . }}",
+	Active:   "\u27a4 {{ .Name | cyan }} key: {{ .Key | faint }}{{ if .IsActive }} (active){{ end }}",
+	Inactive: "  {{ .Name }} key: {{ .Key | faint }}{{ if .IsActive }} (active){{ end }}",
+	Selected: "\u2714 {{ .Name | green }}",
+	Details:  "",
+	Help:     "",
+}
+
+func init() {
+	// Initialize custom primary color if needed, but 'cyan' is built-in and matches PrimaryColor.
+	// For better compatibility with Windows and to avoid the nesting bug, 
+	// we keep the templates clean.
+}
+
 // runList fetches and displays available models for the currently active provider.
 func (a *App) runList(ctx context.Context) int {
 	cfg, _ := core.LoadOrDefault()
@@ -52,11 +86,28 @@ func (a *App) runList(ctx context.Context) int {
 	}
 
 	sort.Strings(fetched)
-	core.HeaderStyle.Printf("  Available models for %s:\n\n", providerLabel)
-	for _, m := range fetched {
-		fmt.Printf("    %s\n", core.MutedStyle.Sprint(m))
+
+	selectPrompt := promptui.Select{
+		Label:     "Select default model",
+		Items:     fetched,
+		Size:      10,
+		Templates: selectTemplates,
+		HideHelp:  true,
 	}
-	fmt.Println()
+
+	_, selected, err := selectPrompt.Run()
+	if err != nil {
+		return 0
+	}
+
+	cfg.DefaultModel = selected
+	path, saveErr := core.Save(cfg)
+	if saveErr != nil {
+		core.ErrorStyle.Printf("%s Failed to save config: %v\n", core.ErrorIcon, saveErr)
+		return 1
+	}
+
+	core.SuccessStyle.Printf("%s Default model set to '%s' in %s\n", core.SuccessIcon, selected, path)
 	return 0
 }
 
@@ -64,21 +115,23 @@ func (a *App) runList(ctx context.Context) int {
 // It lets the user switch providers, set API keys, and browse models.
 func (a *App) runProvider() int {
 	cfg, _ := core.LoadOrDefault()
-
 	activeKey := strings.TrimSpace(cfg.DefaultProvider)
-	labels := make([]string, len(core.Providers))
+
+	items := make([]providerItem, len(core.Providers))
 	for i, p := range core.Providers {
-		label := p.DisplayName
-		if p.Key == activeKey {
-			label += " (active)"
+		items[i] = providerItem{
+			Name:     p.DisplayName,
+			Key:      p.Key,
+			IsActive: p.Key == activeKey,
 		}
-		labels[i] = label
 	}
 
 	selectPrompt := promptui.Select{
-		Label: "Select provider to configure",
-		Items: labels,
-		Size:  len(labels),
+		Label:     "Select provider to configure",
+		Items:     items,
+		Size:      len(items),
+		Templates: providerSelectTemplates,
+		HideHelp:  true,
 	}
 	idx, _, err := selectPrompt.Run()
 	if err != nil {
@@ -89,9 +142,11 @@ func (a *App) runProvider() int {
 	// Ask what to do with the chosen provider.
 	actions := []string{"Set as active provider", "Set API key", "Set active + update API key", "Clear API key", "Cancel"}
 	actionPrompt := promptui.Select{
-		Label: fmt.Sprintf("Action for %s", chosen.DisplayName),
-		Items: actions,
-		Size:  len(actions),
+		Label:     fmt.Sprintf("Action for %s", chosen.DisplayName),
+		Items:     actions,
+		Size:      len(actions),
+		Templates: selectTemplates,
+		HideHelp:  true,
 	}
 	actionIdx, _, err := actionPrompt.Run()
 	if err != nil || actionIdx == len(actions)-1 {

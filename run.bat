@@ -11,15 +11,13 @@ echo   Aifiler CLI - Quick Actions
 echo ==========================================
 echo  1. Run aifiler (Standard)
 echo  2. Build / Rebuild
-echo  3. Run Diagnostics (Doctor)
-echo  4. Exit
+echo  3. Exit
 echo ==========================================
-set /p choice="Choose an option (1-4): "
+set /p choice="Choose an option (1-3): "
 
 if "%choice%"=="1" goto :run_default
 if "%choice%"=="2" goto :build
-if "%choice%"=="3" goto :doctor
-if "%choice%"=="4" goto :exit
+if "%choice%"=="3" goto :exit
 goto :menu
 
 :run_default
@@ -54,12 +52,6 @@ if "%~1"=="" (
     goto :menu
 )
 goto :eof
-
-:doctor
-if not exist "%BINARY%" call :build
-"%BINARY%" doctor
-pause
-goto :menu
 
 :exit
 exit /b 0

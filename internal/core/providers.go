@@ -28,7 +28,7 @@ var Providers = []Provider{
 		Key:            "anthropic",
 		DisplayName:    "Anthropic",
 		RequiresAPIKey: true,
-		Style:          color.RGB(212, 164, 128).Add(color.Bold),
+		Style:          color.New(color.FgHiMagenta, color.Bold),
 	},
 	{
 		Key:            "gemini",
