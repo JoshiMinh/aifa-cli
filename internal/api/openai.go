@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"aifiler/internal/core"
 )
 
 var openaiHTTPClient = &http.Client{Timeout: 30 * time.Second}
@@ -20,11 +22,11 @@ type OpenAIClient struct {
 }
 
 func (c *OpenAIClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	response, err := c.Prompt(ctx, buildFilenameSuggestionPrompt(originalName, contextHint))
+	response, err := c.Prompt(ctx, core.BuildFilenameSuggestionPrompt(originalName, contextHint))
 	if err != nil {
 		return "", err
 	}
-	s := normalizeSuggestion(response)
+	s := core.NormalizeSuggestion(response)
 	if s == "" {
 		return "", fmt.Errorf("openai returned empty suggestion")
 	}

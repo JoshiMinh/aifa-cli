@@ -1,29 +1,13 @@
 package api
 
 import (
-	"context"
-	"fmt"
 	"strings"
 
 	"aifiler/internal/core"
 )
 
-// Client defines the interface for AI operations.
-type Client interface {
-	SuggestName(ctx context.Context, originalName string, contextHint string) (string, error)
-	Prompt(ctx context.Context, prompt string) (string, error)
-	ListModels(ctx context.Context) ([]string, error)
-}
-
-// ClientOptions specifies configuration required to instantiate a new Client.
-type ClientOptions struct {
-	Provider string
-	Model    string
-	Config   core.Config
-}
-
 // NewClient creates and returns the appropriate Client implementation based on the provider.
-func NewClient(opts ClientOptions) Client {
+func NewClient(opts core.ClientOptions) core.Client {
 	provider := strings.ToLower(strings.TrimSpace(opts.Provider))
 	switch provider {
 	case "ollama":
@@ -57,36 +41,6 @@ func NewClient(opts ClientOptions) Client {
 		}
 		return &OpenAIClient{Model: opts.Model, APIKey: apiKey}
 	default:
-		return &DeterministicClient{}
+		return &core.DeterministicClient{}
 	}
-}
-
-// DeterministicClient provides fallback responses when no real AI provider is configured.
-type DeterministicClient struct{}
-
-func (c *DeterministicClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	_ = ctx
-	name := strings.TrimSpace(originalName)
-	if name == "" {
-		return "", fmt.Errorf("empty filename")
-	}
-	name = strings.ReplaceAll(name, "_", " ")
-	name = strings.ReplaceAll(name, "-", " ")
-	name = strings.Join(strings.Fields(name), " ")
-	name = strings.ToLower(name)
-	name = strings.ReplaceAll(name, " ", "-")
-	return name, nil
-}
-
-func (c *DeterministicClient) Prompt(ctx context.Context, prompt string) (string, error) {
-	_ = ctx
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return "", fmt.Errorf("empty prompt")
-	}
-	return "Provider is set to 'none'. Configure a real provider with: aifiler set \"provider\"", nil
-}
-
-func (c *DeterministicClient) ListModels(ctx context.Context) ([]string, error) {
-	return nil, nil
 }

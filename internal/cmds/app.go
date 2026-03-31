@@ -59,16 +59,12 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runDoctor()
 	case "list":
 		return a.runList(ctx)
+	case "provider":
+		return a.runProvider()
 	case "history":
-		return core.RunHistory()
+		return a.runHistory()
 	case "undo":
-		return core.RunUndo()
-	case "set":
-		return a.runSet(remainingArgs[1:])
-	case "default":
-		return a.runDefault(remainingArgs[1:])
-	case "reset":
-		return a.runReset(remainingArgs[1:])
+		return a.runUndo()
 	default:
 		return a.runDynamicPrompt(ctx, strings.Join(remainingArgs, " "))
 	}
@@ -83,7 +79,7 @@ func (a *App) printHelp() {
 	core.HeaderStyle.Println("\\__,_/_/_/ /_/_/\\___/_/     ")
 	core.HeaderStyle.Println()
 
-	core.HeaderStyle.Println("  " + core.SparkleIcon + " aifiler — AI-Powered Filesystem Assistant")
+	core.HeaderStyle.Println("  aifiler — AI-Powered Filesystem Assistant")
 	fmt.Println("  --------------------------------------------------")
 	fmt.Println("  A local-first assistant that translates natural language into safely")
 	fmt.Println("  orchestrated filesystem operations.")
@@ -100,17 +96,23 @@ func (a *App) printHelp() {
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-all"), "Include all file entries in AI context (no truncation)")
 	fmt.Println()
 
-	core.HeaderStyle.Println("  UTILITIES")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("history"), "View recent AI operations")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("undo"), "Revert the last applied AI plan")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("list"), "Switch provider / select model")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("doctor"), "Show runtime diagnostics")
+	core.HeaderStyle.Println("  PROVIDERS")
+	for _, p := range core.Providers {
+		name := p.DisplayName
+		if p.Style != nil {
+			name = p.Style.Sprint(p.DisplayName)
+		}
+		fmt.Printf("    %-30s key: %s\n", name, core.MutedStyle.Sprint(p.Key))
+	}
 	fmt.Println()
 
-	core.HeaderStyle.Println("  CONFIGURATION")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("set \"provider\""), "Save API key and switch to provider")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("default \"model\""), "Set default model")
-	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("reset \"provider\""), "Remove saved key")
+	core.HeaderStyle.Println("  UTILITIES")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("list"), "List available models for the active provider")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("provider"), "Switch provider, set API keys, browse models")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("history"), "View recent AI operations")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("undo"), "Revert the last applied AI plan")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("doctor"), "Show runtime diagnostics")
+	fmt.Printf("    %s\n", core.MutedStyle.Sprintf("Config file: %s", core.ConfigPath()))
 	fmt.Println()
 
 	core.HeaderStyle.Println("  EXAMPLES")
@@ -121,7 +123,7 @@ func (a *App) printHelp() {
 	fmt.Println()
 }
 
-func (a *App) newClient(providerOverride, modelOverride string) (api.Client, string, string, error) {
+func (a *App) newClient(providerOverride, modelOverride string) (core.Client, string, string, error) {
 	cfg, err := core.LoadOrDefault()
 	if err != nil {
 		return nil, "", "", fmt.Errorf("%s failed to load config: %w\n  %s Tip: Check permissions or run 'aifiler doctor'", core.ErrorIcon, err, core.InfoIcon)
@@ -143,7 +145,7 @@ func (a *App) newClient(providerOverride, modelOverride string) (api.Client, str
 		model = "openai/gpt-4o-mini"
 	}
 
-	client := api.NewClient(api.ClientOptions{
+	client := api.NewClient(core.ClientOptions{
 		Provider: provider,
 		Model:    model,
 		Config:   cfg,

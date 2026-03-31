@@ -9,6 +9,7 @@ bin/
 # Local configuration and secrets
 .env
 .env.local
+config.yaml
 history.json
 backups/
 

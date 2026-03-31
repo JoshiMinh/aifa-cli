@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"aifiler/internal/core"
 )
 
 const vercelGatewayBaseURL = "https://ai-gateway.vercel.sh/v1"
@@ -31,11 +32,11 @@ type vercelModelsResponse struct {
 }
 
 func (c *VercelGatewayClient) SuggestName(ctx context.Context, originalName string, contextHint string) (string, error) {
-	response, err := c.Prompt(ctx, buildFilenameSuggestionPrompt(originalName, contextHint))
+	response, err := c.Prompt(ctx, core.BuildFilenameSuggestionPrompt(originalName, contextHint))
 	if err != nil {
 		return "", err
 	}
-	s := normalizeSuggestion(response)
+	s := core.NormalizeSuggestion(response)
 	if s == "" {
 		return "", fmt.Errorf("vercel gateway returned empty suggestion")
 	}
@@ -154,16 +155,10 @@ func (c *VercelGatewayClient) ListModels(ctx context.Context) ([]string, error) 
 func resolveVercelGatewayConfig(apiKey string, baseURL string) (string, string, error) {
 	resolvedAPIKey := strings.TrimSpace(apiKey)
 	if resolvedAPIKey == "" {
-		resolvedAPIKey = strings.TrimSpace(os.Getenv("AI_GATEWAY_API_KEY"))
-	}
-	if resolvedAPIKey == "" {
-		return "", "", fmt.Errorf("missing API key for provider 'vercel' (use: aifiler set \"vercel\" or set AI_GATEWAY_API_KEY)")
+		return "", "", fmt.Errorf("missing API key for provider 'vercel' (use: aifiler set \"vercel\")")
 	}
 
 	resolvedBaseURL := strings.TrimSpace(baseURL)
-	if resolvedBaseURL == "" {
-		resolvedBaseURL = strings.TrimSpace(os.Getenv("AI_GATEWAY_BASE_URL"))
-	}
 	if resolvedBaseURL == "" {
 		resolvedBaseURL = vercelGatewayBaseURL
 	}

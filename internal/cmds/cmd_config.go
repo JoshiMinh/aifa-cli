@@ -12,191 +12,177 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+// runList fetches and displays available models for the currently active provider.
 func (a *App) runList(ctx context.Context) int {
 	cfg, _ := core.LoadOrDefault()
 
-	var activeProviders []string
-	if strings.TrimSpace(cfg.APIKeys["vercel"]) != "" {
-		activeProviders = append(activeProviders, "vercel")
-	}
-	if strings.TrimSpace(cfg.APIKeys["openai"]) != "" {
-		activeProviders = append(activeProviders, "openai")
-	}
-	if strings.TrimSpace(cfg.APIKeys["anthropic"]) != "" {
-		activeProviders = append(activeProviders, "anthropic")
-	}
-	if val, ok := cfg.APIKeys["gemini"]; ok && strings.TrimSpace(val) != "" {
-		activeProviders = append(activeProviders, "gemini")
-	} else if val, ok := cfg.APIKeys["google"]; ok && strings.TrimSpace(val) != "" {
-		activeProviders = append(activeProviders, "gemini")
-	}
-	activeProviders = append(activeProviders, "ollama")
-
-	core.HeaderStyle.Println("Active API Providers")
-	for _, p := range activeProviders {
-		if cfg.DefaultProvider == p {
-			fmt.Printf("%s %s (default)\n", core.SuccessIcon, p)
-		} else {
-			fmt.Printf("  %s\n", p)
-		}
-	}
-	fmt.Println()
-	fmt.Printf("default_model: %s\n\n", cfg.DefaultModel)
-
-	activeProvider := cfg.DefaultProvider
-	if activeProvider == "" || activeProvider == "none" {
-		activeProvider = activeProviders[0]
+	providerKey := strings.TrimSpace(cfg.DefaultProvider)
+	if providerKey == "" || providerKey == "none" {
+		core.WarnStyle.Printf("%s No active provider set. Run 'aifiler provider' to configure one.\n", core.WarnIcon)
+		return 1
 	}
 
-	if len(activeProviders) > 1 {
-		prompt := promptui.Select{
-			Label: "Select active provider to configure",
-			Items: activeProviders,
-			Size:  len(activeProviders),
-		}
-		_, result, err := prompt.Run()
-		if err == nil {
-			activeProvider = result
-		} else {
-			return 0
-		}
+	p, ok := core.ProviderByKey(providerKey)
+	if !ok {
+		core.ErrorStyle.Printf("%s Unknown provider '%s'. Run 'aifiler provider' to set a valid one.\n", core.ErrorIcon, providerKey)
+		return 1
 	}
 
-	core.HeaderStyle.Printf("Fetching dynamic models for '%s'...\n", activeProvider)
+	providerLabel := p.DisplayName
+	if p.Style != nil {
+		providerLabel = p.Style.Sprint(p.DisplayName)
+	}
 
-	clientInst := api.NewClient(api.ClientOptions{
-		Provider: activeProvider,
+	core.HeaderStyle.Printf("\n  Fetching models for %s...\n\n", providerLabel)
+
+	clientInst := api.NewClient(core.ClientOptions{
+		Provider: p.Key,
 		Config:   cfg,
 	})
 
-	fetched, errModels := clientInst.ListModels(ctx)
-	if errModels != nil {
-		core.ErrorStyle.Printf("%s Failed to fetch models: %v\n", core.ErrorIcon, errModels)
-		return 1
-	}
-
-	if len(fetched) > 0 {
-		sort.Strings(fetched)
-		prompt := promptui.Select{
-			Label: fmt.Sprintf("Select default model for %s (Arrow Keys and Enter)", activeProvider),
-			Items: fetched,
-			Size:  15,
-		}
-		_, result, err := prompt.Run()
-		if err == nil {
-			cfg.DefaultModel = result
-			cfg.DefaultProvider = activeProvider
-			path, errSave := core.Save(cfg)
-			if errSave == nil {
-				core.SuccessStyle.Printf("%s Default provider set to '%s' and model to '%s' in %s\n", core.SuccessIcon, activeProvider, result, path)
-			}
-		}
-	} else {
-		core.WarnStyle.Printf("%s No models found for provider '%s'.\n", core.WarnIcon, activeProvider)
-	}
-
-	return 0
-}
-
-func (a *App) runSet(args []string) int {
-	if len(args) < 1 {
-		core.ErrorStyle.Printf("%s Usage: aifiler set \"provider\"\n", core.ErrorIcon)
-		return 2
-	}
-	provider := strings.ToLower(strings.TrimSpace(args[0]))
-	if provider == "" {
-		core.ErrorStyle.Println("provider cannot be empty")
-		return 2
-	}
-
-	var apiKey string
-	if len(args) >= 2 {
-		core.WarnStyle.Printf("%s Warning: Passing API keys via CLI arguments is insecure. Consider using 'aifiler set \"%s\"' to enter it securely.\n", core.WarnIcon, provider)
-		apiKey = strings.TrimSpace(args[1])
-	} else {
-		prompt := promptui.Prompt{
-			Label: fmt.Sprintf("Enter API Key for %s", provider),
-			Mask:  '*',
-		}
-		res, err := prompt.Run()
-		if err != nil {
-			core.ErrorStyle.Printf("%s Failed to read API key\n", core.ErrorIcon)
-			return 1
-		}
-		apiKey = strings.TrimSpace(res)
-	}
-
-	if apiKey == "" {
-		core.ErrorStyle.Println("api key cannot be empty")
-		return 2
-	}
-
-	cfg, _ := core.LoadOrDefault()
-	if cfg.APIKeys == nil {
-		cfg.APIKeys = map[string]string{}
-	}
-	cfg.APIKeys[provider] = apiKey
-	cfg.DefaultProvider = provider
-
-	path, err := core.Save(cfg)
+	fetched, err := clientInst.ListModels(ctx)
 	if err != nil {
-		core.ErrorStyle.Printf("%s failed to save config: %v\n", core.ErrorIcon, err)
+		core.ErrorStyle.Printf("%s Failed to fetch models: %v\n", core.ErrorIcon, err)
 		return 1
 	}
-	core.SuccessStyle.Printf("%s Saved API key for provider '%s' and set as active in %s\n", core.SuccessIcon, provider, path)
-	return 0
-}
 
-func (a *App) runDefault(args []string) int {
-	if len(args) < 1 {
-		core.ErrorStyle.Printf("%s Usage: aifiler default \"model\"\n", core.ErrorIcon)
-		return 2
-	}
-	model := strings.TrimSpace(strings.Join(args, " "))
-	if model == "" {
-		core.ErrorStyle.Printf("%s model cannot be empty\n", core.ErrorIcon)
-		return 2
-	}
-
-	cfg, _ := core.LoadOrDefault()
-	cfg.DefaultModel = model
-	path, err := core.Save(cfg)
-	if err != nil {
-		core.ErrorStyle.Printf("%s failed to save config: %v\n", core.ErrorIcon, err)
-		return 1
-	}
-	core.SuccessStyle.Printf("%s Default model set to '%s' in %s\n", core.SuccessIcon, model, path)
-	return 0
-}
-
-func (a *App) runReset(args []string) int {
-	if len(args) < 1 {
-		core.ErrorStyle.Printf("%s Usage: aifiler reset \"provider\"\n", core.ErrorIcon)
-		return 2
-	}
-	provider := strings.ToLower(strings.TrimSpace(args[0]))
-	if provider == "" {
-		core.ErrorStyle.Println("provider cannot be empty")
-		return 2
-	}
-
-	cfg, _ := core.LoadOrDefault()
-	current := strings.TrimSpace(cfg.APIKeys[provider])
-	if current == "" {
-		core.WarnStyle.Printf("%s No API key found for provider '%s'\n", core.WarnIcon, provider)
+	if len(fetched) == 0 {
+		core.WarnStyle.Printf("%s No models found for %s.\n", core.WarnIcon, providerLabel)
 		return 0
 	}
 
-	cfg.APIKeys[provider] = ""
-	if cfg.DefaultProvider == provider {
-		cfg.DefaultProvider = "none"
+	sort.Strings(fetched)
+	core.HeaderStyle.Printf("  Available models for %s:\n\n", providerLabel)
+	for _, m := range fetched {
+		fmt.Printf("    %s\n", core.MutedStyle.Sprint(m))
+	}
+	fmt.Println()
+	return 0
+}
+
+// runProvider is the primary interactive configuration command.
+// It lets the user switch providers, set API keys, and browse models.
+func (a *App) runProvider() int {
+	cfg, _ := core.LoadOrDefault()
+
+	activeKey := strings.TrimSpace(cfg.DefaultProvider)
+	labels := make([]string, len(core.Providers))
+	for i, p := range core.Providers {
+		label := p.DisplayName
+		if p.Key == activeKey {
+			label += " (active)"
+		}
+		labels[i] = label
 	}
 
-	path, err := core.Save(cfg)
-	if err != nil {
-		core.ErrorStyle.Printf("%s failed to save config: %v\n", core.ErrorIcon, err)
-		return 1
+	selectPrompt := promptui.Select{
+		Label: "Select provider to configure",
+		Items: labels,
+		Size:  len(labels),
 	}
-	core.SuccessStyle.Printf("%s API key reset for provider '%s' in %s\n", core.SuccessIcon, provider, path)
+	idx, _, err := selectPrompt.Run()
+	if err != nil {
+		return 0
+	}
+	chosen := core.Providers[idx]
+
+	// Ask what to do with the chosen provider.
+	actions := []string{"Set as active provider", "Set API key", "Set active + update API key", "Clear API key", "Cancel"}
+	actionPrompt := promptui.Select{
+		Label: fmt.Sprintf("Action for %s", chosen.DisplayName),
+		Items: actions,
+		Size:  len(actions),
+	}
+	actionIdx, _, err := actionPrompt.Run()
+	if err != nil || actionIdx == len(actions)-1 {
+		return 0
+	}
+
+	switch actionIdx {
+	case 0: // Set as active only
+		cfg.DefaultProvider = chosen.Key
+		path, saveErr := core.Save(cfg)
+		if saveErr != nil {
+			core.ErrorStyle.Printf("%s Failed to save config: %v\n", core.ErrorIcon, saveErr)
+			return 1
+		}
+		core.SuccessStyle.Printf("%s Active provider set to '%s' in %s\n", core.SuccessIcon, chosen.DisplayName, path)
+
+	case 1: // Set API key only
+		if !chosen.RequiresAPIKey {
+			core.WarnStyle.Printf("%s %s does not require an API key.\n", core.WarnIcon, chosen.DisplayName)
+			return 0
+		}
+		apiKey, ok := promptAPIKey(chosen.DisplayName)
+		if !ok {
+			return 1
+		}
+		if cfg.APIKeys == nil {
+			cfg.APIKeys = map[string]string{}
+		}
+		cfg.APIKeys[chosen.Key] = apiKey
+		path, saveErr := core.Save(cfg)
+		if saveErr != nil {
+			core.ErrorStyle.Printf("%s Failed to save config: %v\n", core.ErrorIcon, saveErr)
+			return 1
+		}
+		core.SuccessStyle.Printf("%s API key saved for '%s' in %s\n", core.SuccessIcon, chosen.DisplayName, path)
+
+	case 2: // Set active + update API key
+		cfg.DefaultProvider = chosen.Key
+		if chosen.RequiresAPIKey {
+			apiKey, ok := promptAPIKey(chosen.DisplayName)
+			if !ok {
+				return 1
+			}
+			if cfg.APIKeys == nil {
+				cfg.APIKeys = map[string]string{}
+			}
+			cfg.APIKeys[chosen.Key] = apiKey
+		}
+		path, saveErr := core.Save(cfg)
+		if saveErr != nil {
+			core.ErrorStyle.Printf("%s Failed to save config: %v\n", core.ErrorIcon, saveErr)
+			return 1
+		}
+		core.SuccessStyle.Printf("%s Active provider set to '%s' in %s\n", core.SuccessIcon, chosen.DisplayName, path)
+
+	case 3: // Clear API key
+		if cfg.APIKeys == nil || cfg.APIKeys[chosen.Key] == "" {
+			core.WarnStyle.Printf("%s No API key found for '%s'.\n", core.WarnIcon, chosen.DisplayName)
+			return 0
+		}
+		cfg.APIKeys[chosen.Key] = ""
+		if cfg.DefaultProvider == chosen.Key {
+			cfg.DefaultProvider = "none"
+		}
+		path, saveErr := core.Save(cfg)
+		if saveErr != nil {
+			core.ErrorStyle.Printf("%s Failed to save config: %v\n", core.ErrorIcon, saveErr)
+			return 1
+		}
+		core.SuccessStyle.Printf("%s API key cleared for '%s' in %s\n", core.SuccessIcon, chosen.DisplayName, path)
+	}
+
 	return 0
+}
+
+// promptAPIKey interactively asks the user for an API key for the named provider.
+// Returns (key, true) on success or ("", false) on failure.
+func promptAPIKey(providerName string) (string, bool) {
+	prompt := promptui.Prompt{
+		Label: fmt.Sprintf("API key for %s", providerName),
+		Mask:  '*',
+	}
+	res, err := prompt.Run()
+	if err != nil {
+		core.ErrorStyle.Printf("%s Failed to read API key\n", core.ErrorIcon)
+		return "", false
+	}
+	key := strings.TrimSpace(res)
+	if key == "" {
+		core.ErrorStyle.Println("API key cannot be empty")
+		return "", false
+	}
+	return key, true
 }

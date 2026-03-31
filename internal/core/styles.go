@@ -7,13 +7,14 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+// UI styles — derived from theme constants in theme.go.
 var (
-	HeaderStyle  = color.New(color.FgCyan, color.Bold)
-	SuccessStyle = color.New(color.FgGreen)
-	WarnStyle    = color.New(color.FgYellow)
-	ErrorStyle   = color.New(color.FgRed, color.Bold)
-	MutedStyle   = color.New(color.FgHiBlack)
-	PathStyle    = color.New(color.FgHiBlue, color.Italic)
+	HeaderStyle  = color.New(PrimaryColor, color.Bold)
+	SuccessStyle = color.New(SuccessColor)
+	WarnStyle    = color.New(WarnColor)
+	ErrorStyle   = color.New(ErrorColor, color.Bold)
+	MutedStyle   = color.New(MutedColor)
+	PathStyle    = color.New(PathColor, color.Italic)
 )
 
 const (
