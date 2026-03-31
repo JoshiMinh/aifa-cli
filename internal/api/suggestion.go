@@ -1,4 +1,4 @@
-package llm
+package api
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ func buildFilenameSuggestionPrompt(originalName string, contextHint string) stri
 // normalizeSuggestion cleans and formats the AI's response into a valid, kebab-case filename stem.
 func normalizeSuggestion(raw string) string {
 	value := strings.TrimSpace(raw)
-	value = strings.Trim(value, "\"`")
+	value = strings.Trim(value, "`\"")
 	value = strings.ToLower(strings.ReplaceAll(strings.Join(strings.Fields(value), "-"), "_", "-"))
 	return value
 }

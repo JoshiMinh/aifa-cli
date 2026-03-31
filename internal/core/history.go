@@ -1,4 +1,4 @@
-package cli
+package core
 
 import (
 	"encoding/json"
@@ -9,9 +9,10 @@ import (
 	"time"
 )
 
+// HistoryEntry represents a single recorded operation with its plan and backup location.
 type HistoryEntry struct {
 	Timestamp time.Time `json:"timestamp"`
-	Plan      aiPlan    `json:"plan"`
+	Plan      AIPlan    `json:"plan"`
 	BackupDir string    `json:"backup_dir"`
 }
 
@@ -25,7 +26,8 @@ func getBackupBaseDir() string {
 	return filepath.Join(home, ".aifiler", "backups")
 }
 
-func saveStateBeforePlan(cwd string, plan aiPlan) (string, error) {
+// SaveStateBeforePlan backs up files that will be modified by the plan.
+func SaveStateBeforePlan(cwd string, plan AIPlan) (string, error) {
 	ts := time.Now().Format("20060102_150405")
 	backupDir := filepath.Join(getBackupBaseDir(), ts)
 
@@ -40,7 +42,7 @@ func saveStateBeforePlan(cwd string, plan aiPlan) (string, error) {
 			if strings.TrimSpace(path) == "" {
 				continue
 			}
-			target, err := resolvePath(cwd, path)
+			target, err := ResolvePath(cwd, path)
 			if err == nil {
 				data, err := os.ReadFile(target)
 				if err == nil {
@@ -59,7 +61,8 @@ func saveStateBeforePlan(cwd string, plan aiPlan) (string, error) {
 	return backupDir, nil
 }
 
-func appendHistory(entry HistoryEntry) {
+// AppendHistory appends a new entry to the history file (capped at 50 entries).
+func AppendHistory(entry HistoryEntry) {
 	path := getHistoryPath()
 	os.MkdirAll(filepath.Dir(path), 0o755)
 
@@ -78,22 +81,23 @@ func appendHistory(entry HistoryEntry) {
 	os.WriteFile(path, newData, 0o644)
 }
 
-func (a *App) runHistory() int {
+// RunHistory prints recent AI operations to stdout.
+func RunHistory() int {
 	path := getHistoryPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		warnStyle.Printf("%s No history found.\n", warnIcon)
+		WarnStyle.Printf("%s No history found.\n", WarnIcon)
 		return 0
 	}
 	var history []HistoryEntry
 	json.Unmarshal(data, &history)
 
 	if len(history) == 0 {
-		warnStyle.Printf("%s History is empty.\n", warnIcon)
+		WarnStyle.Printf("%s History is empty.\n", WarnIcon)
 		return 0
 	}
 
-	headerStyle.Println("Recent AI Operations:")
+	HeaderStyle.Println("Recent AI Operations:")
 	for i, entry := range history {
 		summary := fmt.Sprintf("%d operations", len(entry.Plan.Operations))
 		fmt.Printf("[%d] %s: %s\n", i+1, entry.Timestamp.Format(time.RFC3339), summary)
@@ -101,51 +105,51 @@ func (a *App) runHistory() int {
 	return 0
 }
 
-func (a *App) runUndo() int {
+// RunUndo reverts the most recent plan from history.
+func RunUndo() int {
 	cwd, _ := os.Getwd()
 	path := getHistoryPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		errorStyle.Printf("%s No history found to undo.\n", errorIcon)
+		ErrorStyle.Printf("%s No history found to undo.\n", ErrorIcon)
 		return 1
 	}
 	var history []HistoryEntry
 	json.Unmarshal(data, &history)
 
 	if len(history) == 0 {
-		warnStyle.Printf("%s History is empty.\n", warnIcon)
+		WarnStyle.Printf("%s History is empty.\n", WarnIcon)
 		return 0
 	}
 
 	last := history[len(history)-1]
-
-	headerStyle.Println("Undoing last operation...")
+	HeaderStyle.Println("Undoing last operation...")
 	for i := len(last.Plan.Operations) - 1; i >= 0; i-- {
 		op := last.Plan.Operations[i]
 		typ := strings.ToLower(strings.TrimSpace(op.Type))
 
 		switch typ {
 		case "create_file", "touch":
-			target, _ := resolvePath(cwd, op.Path)
+			target, _ := ResolvePath(cwd, op.Path)
 			os.Remove(target)
-			successStyle.Printf("%s Removed created file: %s\n", successIcon, op.Path)
+			SuccessStyle.Printf("%s Removed created file: %s\n", SuccessIcon, op.Path)
 		case "create_dir", "mkdir":
-			target, _ := resolvePath(cwd, op.Path)
+			target, _ := ResolvePath(cwd, op.Path)
 			os.RemoveAll(target)
-			successStyle.Printf("%s Removed created dir: %s\n", successIcon, op.Path)
+			SuccessStyle.Printf("%s Removed created dir: %s\n", SuccessIcon, op.Path)
 		case "rename", "move":
-			from, _ := resolvePath(cwd, op.From)
-			to, _ := resolvePath(cwd, op.To)
+			from, _ := ResolvePath(cwd, op.From)
+			to, _ := ResolvePath(cwd, op.To)
 			os.Rename(to, from)
-			successStyle.Printf("%s Reverted rename: %s -> %s\n", successIcon, op.To, op.From)
+			SuccessStyle.Printf("%s Reverted rename: %s -> %s\n", SuccessIcon, op.To, op.From)
 		case "update_file", "write_file":
 			if last.BackupDir != "" {
 				backupTarget := filepath.Join(last.BackupDir, op.Path)
-				target, _ := resolvePath(cwd, op.Path)
+				target, _ := ResolvePath(cwd, op.Path)
 				data, err := os.ReadFile(backupTarget)
 				if err == nil {
 					os.WriteFile(target, data, 0o644)
-					successStyle.Printf("%s Restored updated file: %s\n", successIcon, op.Path)
+					SuccessStyle.Printf("%s Restored updated file: %s\n", SuccessIcon, op.Path)
 				}
 			}
 		}
@@ -155,6 +159,6 @@ func (a *App) runUndo() int {
 	newData, _ := json.MarshalIndent(history, "", "  ")
 	os.WriteFile(path, newData, 0o644)
 
-	successStyle.Printf("\n%s Undo complete.\n", sparkleIcon)
+	SuccessStyle.Printf("\n%s Undo complete.\n", SparkleIcon)
 	return 0
 }

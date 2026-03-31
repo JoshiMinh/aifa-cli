@@ -1,4 +1,4 @@
-package llm
+package api
 
 import "testing"
 

@@ -1,4 +1,4 @@
-package cli
+package core
 
 import (
 	"bufio"
@@ -13,13 +13,15 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-type aiPlan struct {
-	Summary    string        `json:"summary"`
-	NextPrompt string        `json:"next_prompt"`
-	Operations []operation   `json:"operations"`
+// AIPlan represents the structured plan returned by the LLM.
+type AIPlan struct {
+	Summary    string      `json:"summary"`
+	NextPrompt string      `json:"next_prompt"`
+	Operations []Operation `json:"operations"`
 }
 
-type operation struct {
+// Operation represents a single filesystem or shell operation in a plan.
+type Operation struct {
 	Type    string `json:"type"`
 	Path    string `json:"path"`
 	From    string `json:"from"`
@@ -28,55 +30,56 @@ type operation struct {
 	Command string `json:"command"`
 }
 
-type applyResult struct {
+// ApplyResult is returned after user approves or rejects a plan.
+type ApplyResult struct {
 	ExitCode   int
 	NextPrompt string
 }
 
-func parsePlan(raw string) (aiPlan, error) {
-	var p aiPlan
+// ParsePlan attempts to parse a raw JSON string into an AIPlan.
+func ParsePlan(raw string) (AIPlan, error) {
+	var p AIPlan
 	cleaned := strings.TrimSpace(raw)
-	// Remove markdown fences if present
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
-
 	if err := json.Unmarshal([]byte(cleaned), &p); err != nil {
 		return p, err
 	}
 	return p, nil
 }
 
-func applyPlanWithApproval(p aiPlan) applyResult {
+// ApplyPlanWithApproval shows the plan to the user, prompts for approval, and executes.
+func ApplyPlanWithApproval(p AIPlan) ApplyResult {
 	cwd, _ := os.Getwd()
 
-	headerStyle.Println("\nPlan Summary")
+	HeaderStyle.Println("\nPlan Summary")
 	fmt.Printf("  %s\n\n", p.Summary)
 
-	headerStyle.Println("Proposed Operations")
+	HeaderStyle.Println("Proposed Operations")
 	for i, op := range p.Operations {
 		typ := strings.ToLower(strings.TrimSpace(op.Type))
 		desc := ""
 		switch typ {
 		case "create_dir", "mkdir":
-			desc = fmt.Sprintf("%s %s", folderIcon, op.Path)
+			desc = fmt.Sprintf("%s %s", FolderIcon, op.Path)
 		case "create_file", "touch":
-			desc = fmt.Sprintf("%s %s", fileIcon, op.Path)
+			desc = fmt.Sprintf("%s %s", FileIcon, op.Path)
 		case "update_file", "write_file":
-			desc = fmt.Sprintf("%s %s (modified)", editIcon, op.Path)
+			desc = fmt.Sprintf("%s %s (modified)", EditIcon, op.Path)
 		case "rename", "move":
-			desc = fmt.Sprintf("%s %s -> %s", renameIcon, op.From, op.To)
+			desc = fmt.Sprintf("%s %s -> %s", RenameIcon, op.From, op.To)
 		case "delete", "remove":
-			desc = fmt.Sprintf("%s %s (deleted)", deleteIcon, op.Path)
+			desc = fmt.Sprintf("%s %s (deleted)", DeleteIcon, op.Path)
 		case "run_command":
-			desc = fmt.Sprintf("%s %s", commandIcon, op.Command)
+			desc = fmt.Sprintf("%s %s", CommandIcon, op.Command)
 		}
 		fmt.Printf("  %d. %s\n", i+1, desc)
 	}
 
 	if p.NextPrompt != "" {
-		fmt.Printf("\n  %s %s\n", infoIcon, mutedStyle.Sprintf("This plan includes a follow-up: %q", p.NextPrompt))
+		fmt.Printf("\n  %s %s\n", InfoIcon, MutedStyle.Sprintf("This plan includes a follow-up: %q", p.NextPrompt))
 	}
 
 	fmt.Printf("\nApply these operations? [y/N or type next prompt]: ")
@@ -85,75 +88,74 @@ func applyPlanWithApproval(p aiPlan) applyResult {
 	input = strings.ToLower(strings.TrimSpace(input))
 
 	if input == "y" || input == "yes" {
-		backupDir, _ := saveStateBeforePlan(cwd, p)
-		
+		backupDir, _ := SaveStateBeforePlan(cwd, p)
+
 		bar := progressbar.Default(int64(len(p.Operations)), "Applying changes")
 		for _, op := range p.Operations {
 			if err := executeOperation(cwd, op); err != nil {
 				bar.Exit()
-				errorStyle.Printf("\n%s Operation failed: %v\n", errorIcon, err)
-				return applyResult{ExitCode: 1}
+				ErrorStyle.Printf("\n%s Operation failed: %v\n", ErrorIcon, err)
+				return ApplyResult{ExitCode: 1}
 			}
 			bar.Add(1)
 		}
 		fmt.Println()
 
-		appendHistory(HistoryEntry{
+		AppendHistory(HistoryEntry{
 			Timestamp: time.Now(),
 			Plan:      p,
 			BackupDir: backupDir,
 		})
 
-		successStyle.Printf("%s Operations applied successfully.\n", successIcon)
+		SuccessStyle.Printf("%s Operations applied successfully.\n", SuccessIcon)
 		if p.NextPrompt != "" {
-			return applyResult{ExitCode: 0, NextPrompt: p.NextPrompt}
+			return ApplyResult{ExitCode: 0, NextPrompt: p.NextPrompt}
 		}
-		return applyResult{ExitCode: 0}
+		return ApplyResult{ExitCode: 0}
 	} else if input != "" && input != "n" && input != "no" {
-		// Treat any other input as a refinement prompt
-		return applyResult{ExitCode: 0, NextPrompt: input}
+		return ApplyResult{ExitCode: 0, NextPrompt: input}
 	}
 
 	fmt.Println("Plan was not approved. No changes were made.")
-	return applyResult{ExitCode: 0}
+	return ApplyResult{ExitCode: 0}
 }
 
-func executeOperation(cwd string, op operation) error {
+func executeOperation(cwd string, op Operation) error {
 	typ := strings.ToLower(strings.TrimSpace(op.Type))
 	switch typ {
 	case "create_dir", "mkdir":
-		target, err := resolvePath(cwd, op.Path)
+		target, err := ResolvePath(cwd, op.Path)
 		if err != nil {
 			return err
 		}
 		return os.MkdirAll(target, 0o755)
 	case "create_file", "touch":
-		target, err := resolvePath(cwd, op.Path)
+		target, err := ResolvePath(cwd, op.Path)
 		if err != nil {
 			return err
 		}
 		os.MkdirAll(filepath.Dir(target), 0o755)
 		return os.WriteFile(target, []byte(op.Content), 0o644)
 	case "update_file", "write_file":
-		target, err := resolvePath(cwd, op.Path)
+		target, err := ResolvePath(cwd, op.Path)
 		if err != nil {
 			return err
 		}
 		os.MkdirAll(filepath.Dir(target), 0o755)
 		return os.WriteFile(target, []byte(op.Content), 0o644)
 	case "rename", "move":
-		from, err := resolvePath(cwd, op.From)
+		from, err := ResolvePath(cwd, op.From)
 		if err != nil {
 			return err
 		}
-		to, err := resolvePath(cwd, op.To)
+		to, err := ResolvePath(cwd, op.To)
 		if err != nil {
 			return err
 		}
 		os.MkdirAll(filepath.Dir(to), 0o755)
 		return os.Rename(from, to)
 	case "delete", "remove":
-		target, err := resolvePath(cwd, op.Path)
+		target, err := ResolvePath(cwd, op.Path)
 		if err != nil {
 			return err
 		}
@@ -173,7 +175,8 @@ func executeOperation(cwd string, op operation) error {
 	}
 }
 
-func resolvePath(cwd, path string) (string, error) {
+// ResolvePath resolves a relative path safely within cwd.
+func ResolvePath(cwd, path string) (string, error) {
 	abs := filepath.Join(cwd, path)
 	rel, err := filepath.Rel(cwd, abs)
 	if err != nil {

@@ -1,4 +1,4 @@
-package cli
+package core
 
 import (
 	"fmt"
@@ -7,7 +7,9 @@ import (
 	"strings"
 )
 
-func buildWorkspaceContext(maxDepth int, showAll bool) string {
+// BuildWorkspaceContext scans the current directory to the given depth and returns
+// a string describing the file tree for use in LLM prompts.
+func BuildWorkspaceContext(maxDepth int, showAll bool) string {
 	cwd, _ := os.Getwd()
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Current Directory: %s\n\n", cwd))
@@ -22,7 +24,7 @@ func buildWorkspaceContext(maxDepth int, showAll bool) string {
 			return nil
 		}
 
-		// Skip hidden files/dirs (except .aifiler if needed, but usually skip all)
+		// Skip hidden files/dirs
 		if strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -41,12 +43,11 @@ func buildWorkspaceContext(maxDepth int, showAll bool) string {
 		}
 
 		indent := strings.Repeat("  ", depth-1)
-		icon := "📄"
+		icon := FileIcon
 		if d.IsDir() {
-			icon = "📁"
+			icon = FolderIcon
 		}
 
-		// Limit context size to prevent token blowup unless -all is set
 		fileCount++
 		if !showAll && fileCount > 100 {
 			if fileCount == 101 {

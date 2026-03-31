@@ -1,4 +1,4 @@
-package config
+package core
 
 import (
 	"errors"
@@ -43,7 +43,6 @@ func LoadOrDefault() (Config, error) {
 }
 
 // InitDefault creates a default configuration file if one does not already exist.
-// Returns the path to the configuration file or an error if initialization fails.
 func InitDefault() (string, error) {
 	cfg := Default()
 	path, err := configPath()
@@ -68,7 +67,6 @@ func InitDefault() (string, error) {
 }
 
 // Save persists the provided configuration to the designated config file path.
-// Returns the file path where the configuration was saved.
 func Save(cfg Config) (string, error) {
 	path, err := configPath()
 	if err != nil {
@@ -98,14 +96,13 @@ func Default() Config {
 		APIKeys: map[string]string{
 			"openai":    "",
 			"anthropic": "",
-			"google":    "",
+			"gemini":    "",
 			"vercel":    "",
+			"ollama":    "",
 		},
 	}
 }
 
-// configPath returns the absolute path to the configuration file, typically
-// stored within the current user's configuration directory.
 func configPath() (string, error) {
 	baseDir, err := os.UserConfigDir()
 	if err != nil {

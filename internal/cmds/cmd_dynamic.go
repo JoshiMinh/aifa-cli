@@ -1,9 +1,11 @@
-package cli
+package cmds
 
 import (
 	"context"
 	"fmt"
 	"strings"
+
+	"aifiler/internal/core"
 )
 
 func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
@@ -15,15 +17,14 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 
 	client, provider, model, err := a.newClient("", "")
 	if err != nil {
-		errorStyle.Printf("failed to initialize model client: %v\n", err)
+		core.ErrorStyle.Printf("failed to initialize model client: %v\n", err)
 		return 1
 	}
 
 	for {
-		workspaceContext := buildWorkspaceContext(a.maxDepth, a.showAll)
-		thinking := startThinking("AI is thinking")
+		workspaceContext := core.BuildWorkspaceContext(a.maxDepth, a.showAll)
+		thinking := core.StartThinking("AI is thinking")
 
-		// Handle / prefixes for intent forcing
 		finalPrompt := currentPrompt
 		if strings.HasPrefix(currentPrompt, "/") {
 			parts := strings.SplitN(currentPrompt[1:], " ", 2)
@@ -36,28 +37,28 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 		}
 
 		response, err := client.Prompt(ctx, buildDynamicPrompt(finalPrompt, workspaceContext))
-		thinking.stop("AI response ready")
+		thinking.Stop("AI response ready")
 		if err != nil {
-			errorStyle.Printf("model request failed: %v\n", err)
+			core.ErrorStyle.Printf("model request failed: %v\n", err)
 			return 1
 		}
 
-		plan, parseErr := parsePlan(response)
+		plan, parseErr := core.ParsePlan(response)
 		if parseErr != nil {
-			coerceThinking := startThinking("AI is restructuring response as plan")
+			coerceThinking := core.StartThinking("AI is restructuring response as plan")
 			coerced, coerceErr := client.Prompt(ctx, buildPlanCoercionPrompt(currentPrompt, response))
-			coerceThinking.stop("Plan conversion ready")
+			coerceThinking.Stop("Plan conversion ready")
 			if coerceErr == nil {
-				if repairedPlan, repairedErr := parsePlan(coerced); repairedErr == nil {
+				if repairedPlan, repairedErr := core.ParsePlan(coerced); repairedErr == nil {
 					plan = repairedPlan
 					parseErr = nil
 				}
 			}
 		}
 
-		mutedStyle.Printf("provider=%s model=%s\n", provider, model)
+		core.MutedStyle.Printf("provider=%s model=%s\n", provider, model)
 		if parseErr == nil && len(plan.Operations) > 0 {
-			result := applyPlanWithApproval(plan)
+			result := core.ApplyPlanWithApproval(plan)
 			if strings.TrimSpace(result.NextPrompt) == "" {
 				return result.ExitCode
 			}
@@ -65,7 +66,7 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 			continue
 		}
 		if parseErr == nil && len(plan.Operations) == 0 {
-			warnStyle.Println("No operations proposed for this prompt.")
+			core.WarnStyle.Println("No operations proposed for this prompt.")
 			fmt.Println("Try a more specific prompt or request a concrete file/folder change.")
 			return 0
 		}
