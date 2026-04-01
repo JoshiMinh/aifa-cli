@@ -1,33 +1,29 @@
 # Build artifacts
-*.exe
-*.exe~
-tmp.exe
-aifiler
 dist/
 bin/
+tmp.exe
+*.exe~
 
 # Local configuration and secrets
-.env
-.env.local
-config.yaml
-history.json
 backups/
+history.json
+config.yaml
 
 # User-specific config mocks
 .aifiler/
 
 # Go specific
 vendor/
+go.work
 *.test
 *.prof
-go.work
 
 # IDEs
-.vscode/
 .idea/
-.DS_Store
+.vscode/
 *.swp
+.DS_Store
 
 # OS specific
-Thumbs.db
 desktop.ini
+Thumbs.db
