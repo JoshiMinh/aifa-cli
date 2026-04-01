@@ -1,16 +1,12 @@
 package core
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/schollz/progressbar/v3"
 )
 
 // AIPlan represents the structured plan returned by the LLM.
@@ -50,77 +46,8 @@ func ParsePlan(raw string) (AIPlan, error) {
 	return p, nil
 }
 
-// ApplyPlanWithApproval shows the plan to the user, prompts for approval, and executes.
-func ApplyPlanWithApproval(p AIPlan) ApplyResult {
-	cwd, _ := os.Getwd()
 
-	HeaderStyle.Println("\nPlan Summary")
-	fmt.Printf("  %s\n\n", p.Summary)
-
-	HeaderStyle.Println("Proposed Operations")
-	for i, op := range p.Operations {
-		typ := strings.ToLower(strings.TrimSpace(op.Type))
-		desc := ""
-		switch typ {
-		case "create_dir", "mkdir":
-			desc = fmt.Sprintf("%s %s", FolderIcon, op.Path)
-		case "create_file", "touch":
-			desc = fmt.Sprintf("%s %s", FileIcon, op.Path)
-		case "update_file", "write_file":
-			desc = fmt.Sprintf("%s %s (modified)", EditIcon, op.Path)
-		case "rename", "move":
-			desc = fmt.Sprintf("%s %s -> %s", RenameIcon, op.From, op.To)
-		case "delete", "remove":
-			desc = fmt.Sprintf("%s %s (deleted)", DeleteIcon, op.Path)
-		case "run_command":
-			desc = fmt.Sprintf("%s %s", CommandIcon, op.Command)
-		}
-		fmt.Printf("  %d. %s\n", i+1, desc)
-	}
-
-	if p.NextPrompt != "" {
-		fmt.Printf("\n  %s %s\n", InfoIcon, MutedStyle.Sprintf("This plan includes a follow-up: %q", p.NextPrompt))
-	}
-
-	fmt.Printf("\nApply these operations? [y/N or type next prompt]: ")
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.ToLower(strings.TrimSpace(input))
-
-	if input == "y" || input == "yes" {
-		backupDir, _ := SaveStateBeforePlan(cwd, p)
-
-		bar := progressbar.Default(int64(len(p.Operations)), "Applying changes")
-		for _, op := range p.Operations {
-			if err := executeOperation(cwd, op); err != nil {
-				bar.Exit()
-				ErrorStyle.Printf("\n%s Operation failed: %v\n", ErrorIcon, err)
-				return ApplyResult{ExitCode: 1}
-			}
-			bar.Add(1)
-		}
-		fmt.Println()
-
-		AppendHistory(HistoryEntry{
-			Timestamp: time.Now(),
-			Plan:      p,
-			BackupDir: backupDir,
-		})
-
-		SuccessStyle.Printf("%s Operations applied successfully.\n", SuccessIcon)
-		if p.NextPrompt != "" {
-			return ApplyResult{ExitCode: 0, NextPrompt: p.NextPrompt}
-		}
-		return ApplyResult{ExitCode: 0}
-	} else if input != "" && input != "n" && input != "no" {
-		return ApplyResult{ExitCode: 0, NextPrompt: input}
-	}
-
-	fmt.Println("Plan was not approved. No changes were made.")
-	return ApplyResult{ExitCode: 0}
-}
-
-func executeOperation(cwd string, op Operation) error {
+func ExecuteOperation(cwd string, op Operation) error {
 	typ := strings.ToLower(strings.TrimSpace(op.Type))
 	switch typ {
 	case "create_dir", "mkdir":

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -63,7 +64,8 @@ func (c *OllamaClient) Prompt(ctx context.Context, prompt string) (string, error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ollama request failed with status %d", resp.StatusCode)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("ollama request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 
 	var out struct {

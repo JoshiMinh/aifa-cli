@@ -15,9 +15,9 @@ func NewClient(opts core.ClientOptions) core.Client {
 	case "vercel":
 		apiKey := ""
 		if opts.Config.APIKeys != nil {
-			apiKey = strings.TrimSpace(opts.Config.APIKeys["vercel"])
+			apiKey = opts.Config.APIKeys["vercel"]
 		}
-		return &VercelGatewayClient{Model: opts.Model, APIKey: apiKey}
+		return &VercelGatewayClient{Model: opts.Model, APIKey: strings.TrimSpace(apiKey)}
 	case "gemini", "google":
 		apiKey := ""
 		if opts.Config.APIKeys != nil {
@@ -31,15 +31,15 @@ func NewClient(opts core.ClientOptions) core.Client {
 	case "anthropic":
 		apiKey := ""
 		if opts.Config.APIKeys != nil {
-			apiKey = strings.TrimSpace(opts.Config.APIKeys["anthropic"])
+			apiKey = opts.Config.APIKeys["anthropic"]
 		}
-		return &AnthropicClient{Model: opts.Model, APIKey: apiKey}
+		return &AnthropicClient{Model: opts.Model, APIKey: strings.TrimSpace(apiKey)}
 	case "openai":
 		apiKey := ""
 		if opts.Config.APIKeys != nil {
-			apiKey = strings.TrimSpace(opts.Config.APIKeys["openai"])
+			apiKey = opts.Config.APIKeys["openai"]
 		}
-		return &OpenAIClient{Model: opts.Model, APIKey: apiKey}
+		return &OpenAIClient{Model: opts.Model, APIKey: strings.TrimSpace(apiKey)}
 	default:
 		return &core.DeterministicClient{}
 	}

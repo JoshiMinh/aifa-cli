@@ -15,6 +15,7 @@ import (
 type App struct {
 	maxDepth int
 	showAll  bool
+	force    bool
 }
 
 // NewApp creates a new App instance.
@@ -22,6 +23,7 @@ func NewApp() *App {
 	return &App{
 		maxDepth: 1,
 		showAll:  false,
+		force:    false,
 	}
 }
 
@@ -46,6 +48,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		switch arg {
 		case "-all":
 			a.showAll = true
+		case "-force":
+			a.force = true
 		default:
 			remainingArgs = append(remainingArgs, arg)
 		}
@@ -95,9 +99,19 @@ func (a *App) printHelp() {
 	fmt.Println()
 
 	core.HeaderStyle.Println("  OPTIONS")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("(default)"), "Scan root directory only")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-d"), "Scan root and immediate subfolders (one-level)")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-d<n>"), "Scan up to <n> levels of subfolders (e.g. -d2, -d3)")
 	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-all"), "Include all file entries in AI context (no truncation)")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("-force"), "Force the AI to return a suggestion")
+	fmt.Println()
+
+	core.HeaderStyle.Println("  INTENTS")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("/explain"), "Ask for an explanation of files or project structure")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("/create"), "Force creation of files/folders")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("/rename"), "Force renaming/moving of files/folders")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("/delete"), "Force deletion of files/folders")
+	fmt.Printf("    %-25s %s\n", core.MutedStyle.Sprint("/run"), "Force execution of shell commands")
 	fmt.Println()
 
 	core.HeaderStyle.Println("  PROVIDERS")
@@ -123,6 +137,8 @@ func (a *App) printHelp() {
 	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -d \"rename all .js files to .ts\""))
 	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -d3 -all \"search for sensitive hardcoded keys\""))
 	fmt.Println("    " + core.MutedStyle.Sprint("aifiler \"/delete temp log files\""))
+	fmt.Println("    " + core.MutedStyle.Sprint("aifiler \"/explain the project structure\""))
+	fmt.Println("    " + core.MutedStyle.Sprint("aifiler -force \"make some improvements\""))
 	fmt.Println()
 }
 

@@ -4,15 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"aifiler/internal/core"
 )
 
 // runHistory prints recent AI operations to stdout.
 func (a *App) runHistory() int {
-	path := core.GetHistoryPath() // I will export this in core
+	path := core.GetHistoryPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		core.WarnStyle.Printf("%s No history found.\n", core.WarnIcon)
@@ -54,40 +52,18 @@ func (a *App) runUndo() int {
 
 	last := history[len(history)-1]
 	core.HeaderStyle.Println("Undoing last operation...")
-	for i := len(last.Plan.Operations) - 1; i >= 0; i-- {
-		op := last.Plan.Operations[i]
-		typ := strings.ToLower(strings.TrimSpace(op.Type))
 
-		switch typ {
-		case "create_file", "touch":
-			target, _ := core.ResolvePath(cwd, op.Path)
-			os.Remove(target)
-			core.SuccessStyle.Printf("%s Removed created file: %s\n", core.SuccessIcon, op.Path)
-		case "create_dir", "mkdir":
-			target, _ := core.ResolvePath(cwd, op.Path)
-			os.RemoveAll(target)
-			core.SuccessStyle.Printf("%s Removed created dir: %s\n", core.SuccessIcon, op.Path)
-		case "rename", "move":
-			from, _ := core.ResolvePath(cwd, op.From)
-			to, _ := core.ResolvePath(cwd, op.To)
-			os.Rename(to, from)
-			core.SuccessStyle.Printf("%s Reverted rename: %s -> %s\n", core.SuccessIcon, op.To, op.From)
-		case "update_file", "write_file":
-			if last.BackupDir != "" {
-				backupTarget := filepath.Join(last.BackupDir, op.Path)
-				target, _ := core.ResolvePath(cwd, op.Path)
-				data, err := os.ReadFile(backupTarget)
-				if err == nil {
-					os.WriteFile(target, data, 0o644)
-					core.SuccessStyle.Printf("%s Restored updated file: %s\n", core.SuccessIcon, op.Path)
-				}
-			}
-		}
+	messages, err := core.RevertPlan(cwd, last)
+	if err != nil {
+		core.ErrorStyle.Printf("%s Undo failed: %v\n", core.ErrorIcon, err)
+		return 1
 	}
 
-	history = history[:len(history)-1]
-	newData, _ := json.MarshalIndent(history, "", "  ")
-	os.WriteFile(path, newData, 0o644)
+	for _, msg := range messages {
+		core.SuccessStyle.Printf("%s %s\n", core.SuccessIcon, msg)
+	}
+
+	core.RemoveLastHistory()
 
 	core.SuccessStyle.Printf("\n%s Undo complete.\n", core.SparkleIcon)
 	return 0

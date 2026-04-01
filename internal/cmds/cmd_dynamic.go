@@ -26,25 +26,38 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 		thinking := core.StartThinking("AI is thinking")
 
 		finalPrompt := currentPrompt
+		isExplain := false
 		if strings.HasPrefix(currentPrompt, "/") {
 			parts := strings.SplitN(currentPrompt[1:], " ", 2)
-			intent := parts[0]
+			intent := strings.ToLower(parts[0])
 			rest := ""
 			if len(parts) > 1 {
 				rest = parts[1]
 			}
-			finalPrompt = fmt.Sprintf("FORCE OPERATION TYPE: %s\nUSER REQUEST: %s", strings.ToUpper(intent), rest)
+			if intent == "explain" {
+				isExplain = true
+				finalPrompt = fmt.Sprintf("EXPLAIN THE FOLLOWING: %s\nProvide a clear, concise explanation. Do not return JSON actions.", rest)
+			} else {
+				finalPrompt = fmt.Sprintf("FORCE OPERATION TYPE: %s\nUSER REQUEST: %s", strings.ToUpper(intent), rest)
+			}
 		}
 
-		response, err := client.Prompt(ctx, buildDynamicPrompt(finalPrompt, workspaceContext))
+		response, err := client.Prompt(ctx, buildDynamicPrompt(finalPrompt, workspaceContext, a.force && !isExplain))
 		thinking.Stop("AI response ready")
 		if err != nil {
 			core.ErrorStyle.Printf("model request failed: %v\n", err)
 			return 1
 		}
 
-		plan, parseErr := core.ParsePlan(response)
-		if parseErr != nil {
+		var plan core.AIPlan
+		var parseErr error
+		if isExplain {
+			parseErr = fmt.Errorf("explain mode")
+		} else {
+			plan, parseErr = core.ParsePlan(response)
+		}
+
+		if parseErr != nil && !isExplain {
 			coerceThinking := core.StartThinking("AI is restructuring response as plan")
 			coerced, coerceErr := client.Prompt(ctx, buildPlanCoercionPrompt(currentPrompt, response))
 			coerceThinking.Stop("Plan conversion ready")
@@ -58,7 +71,7 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 
 		core.MutedStyle.Printf("provider=%s model=%s\n", provider, model)
 		if parseErr == nil && len(plan.Operations) > 0 {
-			result := core.ApplyPlanWithApproval(plan)
+			result := ApplyPlanWithApproval(plan)
 			if strings.TrimSpace(result.NextPrompt) == "" {
 				return result.ExitCode
 			}
@@ -66,8 +79,12 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 			continue
 		}
 		if parseErr == nil && len(plan.Operations) == 0 {
-			core.WarnStyle.Println("No operations proposed for this prompt.")
-			fmt.Println("Try a more specific prompt or request a concrete file/folder change.")
+			if a.force {
+				core.WarnStyle.Println("AI failed to propose operations even with -force flag.")
+			} else {
+				core.WarnStyle.Println("No operations proposed for this prompt.")
+				fmt.Println("Try a more specific prompt, or use -force to insist on a suggestion.")
+			}
 			return 0
 		}
 
@@ -76,20 +93,26 @@ func (a *App) runDynamicPrompt(ctx context.Context, prompt string) int {
 	}
 }
 
-func buildDynamicPrompt(userPrompt, workspaceContext string) string {
+func buildDynamicPrompt(userPrompt, workspaceContext string, force bool) string {
+	forceText := ""
+	if force {
+		forceText = "\nIMPORTANT: You MUST propose at least one filesystem operation in the JSON format below. Do not return plain text."
+	}
 	return fmt.Sprintf(`You are operating in a local workspace.
 If the user request requires filesystem or command actions, return STRICT JSON only in this format:
 {"summary":"brief explanation of plan","operations":[{"type":"create_dir|create_file|update_file|rename|delete|run_command","path":"relative/path","from":"relative/path","to":"relative/path","content":"optional","command":"optional"}]}
-If the request is informational only, return a normal text response.
+If the request is informational only, return a normal text response.%s
 Rules for action plans:
 - infer file/folder targets from workspace context; do not ask user to describe structure
 - paths must be relative and within current directory
 - use update_file when modifying existing files
 - use run_command only when necessary and keep commands non-interactive
 - no markdown fences when returning JSON
+- for text responses, DO NOT use markdown format (like bold, headers, or bullet lists); use plain text only
+- for workspace context, lines starting with symbols (like ◆, ▸, ▫) denote types; the symbol is a label, NOT part of the path name
 Workspace context:
 %s
-User request: %s`, workspaceContext, userPrompt)
+User request: %s`, forceText, workspaceContext, userPrompt)
 }
 
 func buildPlanCoercionPrompt(userPrompt, modelResponse string) string {

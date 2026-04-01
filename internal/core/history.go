@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,60 @@ func AppendHistory(entry HistoryEntry) {
 		history = history[len(history)-50:]
 	}
 
+	saveData, _ := json.MarshalIndent(history, "", "  ")
+	os.WriteFile(path, saveData, 0o644)
+}
+
+// RevertPlan reverses the operations in a plan using the provided backup directory.
+// It returns a slice of messages describing what was done.
+func RevertPlan(cwd string, entry HistoryEntry) ([]string, error) {
+	var messages []string
+	for i := len(entry.Plan.Operations) - 1; i >= 0; i-- {
+		op := entry.Plan.Operations[i]
+		typ := strings.ToLower(strings.TrimSpace(op.Type))
+
+		switch typ {
+		case "create_file", "touch":
+			target, _ := ResolvePath(cwd, op.Path)
+			os.Remove(target)
+			messages = append(messages, "Removed created file: "+op.Path)
+		case "create_dir", "mkdir":
+			target, _ := ResolvePath(cwd, op.Path)
+			os.RemoveAll(target)
+			messages = append(messages, "Removed created dir: "+op.Path)
+		case "rename", "move":
+			from, _ := ResolvePath(cwd, op.From)
+			to, _ := ResolvePath(cwd, op.To)
+			os.Rename(to, from)
+			messages = append(messages, fmt.Sprintf("Reverted rename: %s -> %s", op.To, op.From))
+		case "update_file", "write_file":
+			if entry.BackupDir != "" {
+				backupTarget := filepath.Join(entry.BackupDir, op.Path)
+				target, _ := ResolvePath(cwd, op.Path)
+				data, err := os.ReadFile(backupTarget)
+				if err == nil {
+					os.WriteFile(target, data, 0o644)
+					messages = append(messages, "Restored updated file: "+op.Path)
+				}
+			}
+		}
+	}
+	return messages, nil
+}
+
+// RemoveLastHistory removes the most recent entry from history.
+func RemoveLastHistory() {
+	path := GetHistoryPath()
+	var history []HistoryEntry
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	json.Unmarshal(data, &history)
+	if len(history) == 0 {
+		return
+	}
+	history = history[:len(history)-1]
 	newData, _ := json.MarshalIndent(history, "", "  ")
 	os.WriteFile(path, newData, 0o644)
 }

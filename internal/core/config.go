@@ -19,13 +19,14 @@ type Config struct {
 
 const configFileName = "config.yaml"
 
-// configPath returns the absolute path to config.yaml in the current working directory.
+// configPath returns the absolute path to config.yaml in the application's executable directory.
 func configPath() (string, error) {
-	cwd, err := os.Getwd()
+	exePath, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %w", err)
+		return "", fmt.Errorf("failed to determine executable path: %w", err)
 	}
-	return filepath.Join(cwd, configFileName), nil
+	exeDir := filepath.Dir(exePath)
+	return filepath.Join(exeDir, configFileName), nil
 }
 
 // defaultConfigComment is prepended to new config files so users can edit keys directly.
